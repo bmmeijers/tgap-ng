@@ -992,6 +992,8 @@ def remove_node(node_id, pp):
 #    stars = pp.stars
 #    stars.pop(node_id)
 
+    # FIXME: store node
+
 
 def remove_face(face_id, pp):
     """
@@ -1044,21 +1046,22 @@ def output_edge(output, pp, edge_id, face_step):
         e.id, e.info["step_low"], face_step
     )
     tup = (
-        e.id,
-        e.start_node_id,
-        e.end_node_id,
-        e.left_face_id,
-        e.right_face_id,
-        parent(e.left_face_id, pp.face_hierarchy),
-        parent(e.right_face_id, pp.face_hierarchy),
-        0,
-        0,
-        e.info["step_low"],
-        face_step,
-        None,
-        None,
-        None,
-        e.geometry,
+        e.id,                                       # edge id
+        e.info["step_low"],                         # step low
+        face_step,                                  # step high
+
+        e.start_node_id,                            # start node
+        e.end_node_id,                              # end node
+        e.left_face_id,                             # left face low
+        e.right_face_id,                            # right face low
+        parent(e.left_face_id, pp.face_hierarchy),  # left face high
+        parent(e.right_face_id, pp.face_hierarchy), # right face high
+        #0,
+        #0,
+        None,                                       # edge klass (when it represents a linear object)
+        #None,
+        #None,
+        e.geometry,                                 # geometry
     )
     output.edge.append(*tup)
 
@@ -1227,11 +1230,11 @@ def output_face(output, pp, face_id, face_step):
     f = pp.faces[face_id]
     tup = (
         f.id,
-        None,
-        None,
+        #None,
+        #None,
         f.info["step_low"],
         face_step,
-        None,
+        #None,
         f.info["area"],
         f.info["feature_class_id"],
         f.mbr_geometry,
@@ -1257,7 +1260,9 @@ def output_face_hierarchy(output, pp, face_id, parent_face_id, face_step):
 
     f = pp.faces[face_id]
     assert f.id == face_id
-    tup = (f.id, None, None, f.info["step_low"], face_step, parent_face_id)
+    tup = (f.id, 
+            #None, None, 
+            f.info["step_low"], face_step, parent_face_id)
     output.face_hierarchy.append(*tup)
 
 

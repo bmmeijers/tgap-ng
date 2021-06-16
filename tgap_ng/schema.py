@@ -26,9 +26,9 @@ def output_layers(name, srid):
 
     tgap = tGAP()
     # imp values
-    imp_low = Field("imp_low", "float8")
-    imp_high = Field("imp_high", "float8")
-    imp_own = Field("imp_own", "float8")
+    #imp_low = Field("imp_low", "float8")
+    #imp_high = Field("imp_high", "float8")
+    #imp_own = Field("imp_own", "float8")
     # step
     step_low = Field("step_low", "integer") # max: 2147483647
     step_high = Field("step_high", "integer")
@@ -69,10 +69,10 @@ def output_layers(name, srid):
     #
     face_schema = Schema(
         [face_id, 
-         imp_low, imp_high, 
+         #imp_low, imp_high, 
          step_low, step_high,
          #gstep_low, gstep_high,
-         imp_own, 
+         #imp_own, 
          area, 
          klass,
          ###### DEVELOPMENT GROUPS ########
@@ -83,8 +83,8 @@ def output_layers(name, srid):
          ###### DEVELOPMENT GROUPS ########
          mbr, pip],
         [Index(fields = [face_id, step_low], primary_key = True), 
-         Index(fields = [imp_low]),
-         Index(fields = [imp_high]),
+         #Index(fields = [imp_low]),
+         #Index(fields = [imp_high]),
          Index(fields = [mbr])
          ]
     )
@@ -101,30 +101,31 @@ def output_layers(name, srid):
     #
     face_hier_schema = Schema(
         [face_id,
-         imp_low, imp_high,
+         # imp_low, imp_high,
          step_low, step_high,
          parent_id,
          ],
         [Index(fields = [face_id, step_low], primary_key = True),
-         Index(fields = [imp_low]),
-         Index(fields = [imp_high]),
+         #Index(fields = [imp_low]),
+         #Index(fields = [imp_high]),
          Index(fields = [parent_id]), ]
     )
     #
     edge_schema = Schema(
         [edge_id, 
+         step_low, step_high, 
          start, end, 
          left_low, right_low, left_high, right_high, 
-         imp_low, imp_high,
-         step_low, step_high, 
+         #imp_low, imp_high,
+
          #gstep_low, gstep_high,
          edge_class,
-         pickled_blg,
-         smoothline,
+         #pickled_blg,
+         #smoothline,
          path],
         [Index(fields = [edge_id, step_low], primary_key = True),
-         Index(fields = [imp_low]),
-         Index(fields = [imp_high]),
+         #Index(fields = [imp_low]),
+         #Index(fields = [imp_high]),
          Index(fields = [step_low]),
          Index(fields = [step_high]),
          Index(fields = [path])]
@@ -138,7 +139,7 @@ def output_layers(name, srid):
 
     face_step = Field("face_step", "integer")
     edge_ct_simplified = Field("edges_simplified", "integer") # max: 2147483647
-    edge_ct_total = Field("edges_totaL", "integer")
+    edge_ct_total = Field("edges_total", "integer")
 
     edge_stats_schema = Schema(
         [face_step, edge_ct_simplified, edge_ct_total],
