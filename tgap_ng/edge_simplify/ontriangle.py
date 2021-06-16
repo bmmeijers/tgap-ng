@@ -25,18 +25,18 @@ def orient2d(pa, pb, pc):
 def sign(value):
     if value > 0:
         return 1
-    elif value < 0:    
+    elif value < 0:
         return -1
     else:
         return 0
 
 
-#def on_triangle(pt, a, b, c):
+# def on_triangle(pt, a, b, c):
 #    """
 #    Using signed distances to edges (halfplanes)
 
-#    Returns true when ``pt'' is on triangle (formed by point ``a'', ``b'' 
-#    and ``c''), which means: not on exterior (returns False); On interior or 
+#    Returns true when ``pt'' is on triangle (formed by point ``a'', ``b''
+#    and ``c''), which means: not on exterior (returns False); On interior or
 #    on boundary (returns True)
 #    """
 #    dists = orient2d(a, b, pt), orient2d(b, c, pt), orient2d(c, a, pt)
@@ -65,12 +65,12 @@ def sign(value):
 #    return True
 
 
-#def on_triangle(p, p0, p1, p2):
+# def on_triangle(p, p0, p1, p2):
 #    """
 #    Using bary-centric logic (twice as fast as halfplane based method)
 
-#    Returns true when ``pt'' is on triangle (formed by point ``a'', ``b'' 
-#    and ``c''), which means: not on exterior (returns False); On interior or 
+#    Returns true when ``pt'' is on triangle (formed by point ``a'', ``b''
+#    and ``c''), which means: not on exterior (returns False); On interior or
 #    on boundary (returns True)
 
 #    From: https://stackoverflow.com/a/34093754
@@ -86,6 +86,7 @@ def sign(value):
 #        return s <= 0 and t <= 0 and s+t >= D
 #    else:
 #        return s >= 0 and t >= 0 and s+t <= D
+
 
 def on_triangle(p_test, p0, p1, p2):
     """
@@ -104,39 +105,45 @@ def on_triangle(p_test, p0, p1, p2):
     dX10 = p1[0] - p0[0]
     dY10 = p1[1] - p0[1]
 
-    s_p = (dY20*dX) - (dX20*dY)
-    t_p = (dX10*dY) - (dY10*dX)
-    D = (dX10*dY20) - (dY10*dX20)
+    s_p = (dY20 * dX) - (dX20 * dY)
+    t_p = (dX10 * dY) - (dY10 * dX)
+    D = (dX10 * dY20) - (dY10 * dX20)
 
     if D > 0:
-        return (  (s_p >= 0) and (t_p >= 0) and (s_p + t_p) <= D  )
+        return (s_p >= 0) and (t_p >= 0) and (s_p + t_p) <= D
     else:
-        return (  (s_p <= 0) and (t_p <= 0) and (s_p + t_p) >= D  )
+        return (s_p <= 0) and (t_p <= 0) and (s_p + t_p) >= D
 
 
 def test_degenerate():
     assert not on_triangle([11, 45], [45, 45], [45, 45], [44, 45])
 
-def _test():    
+
+def _test():
     """unit test for on_triangle"""
     a, b, c = (10, 10), (25, 10), (25, 25)
     # 6 permutations to form the triangle
-    T = [(a, b, c),
-         (a, c, b),
-         (b, a, c),
-         (b, c, a),
-         (c, a, b),
-         (c, b, a),]
-    inside = set([(10, 10), (15, 10), (20, 10), (25, 10),
-                            (15, 15), (20, 15), (25, 15),
-                                      (20, 20), (25, 20),
-                                                (25, 25),])
+    T = [(a, b, c), (a, c, b), (b, a, c), (b, c, a), (c, a, b), (c, b, a)]
+    inside = set(
+        [
+            (10, 10),
+            (15, 10),
+            (20, 10),
+            (25, 10),
+            (15, 15),
+            (20, 15),
+            (25, 15),
+            (20, 20),
+            (25, 20),
+            (25, 25),
+        ]
+    )
 
     for _ in range(10000):
         for t in range(6):
             p0, p1, p2 = T[t]
             for i in range(-10, 50, 5):
-                for j in range(0, 31, 5):    
+                for j in range(0, 31, 5):
                     pt = (i, j)
                     on = on_triangle(pt, p0, p1, p2)
                     if pt in inside:
@@ -144,6 +151,7 @@ def _test():
                     else:
                         assert not on, "p<{0}>, t<{1}, {2}, {3}>".format(pt, p0, p1, p2)
 
-if __name__ == '__main__':
-#    _test()
+
+if __name__ == "__main__":
+    #    _test()
     test_degenerate()

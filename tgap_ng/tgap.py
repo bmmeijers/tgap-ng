@@ -15,6 +15,7 @@
 ## END print replacement
 import logging
 import sys
+
 # logging is used inside connection + grassfire (split), we can set the level here
 logging.basicConfig(level=logging.FATAL)
 import pprint
@@ -59,7 +60,7 @@ from .datastructure import (
     parent,
     remove_edge,
     remove_face,
-    remove_node
+    remove_node,
 )
 from functools import partial
 from splitarea.harvest import (
@@ -80,7 +81,11 @@ from .schema import output_layers
 from .loader import AsyncLoader
 from io import StringIO
 from contextlib import closing
-from . import simplify
+
+# FIXME: make possible to use both, dependent on line?
+# from .edge_simplify.visvalingham_whyatt import simplify
+from .edge_simplify.reumann_witkam import simplify_reumann_witkam as simplify
+
 import sys
 
 
@@ -95,13 +100,13 @@ import sys
 # SRID = 28992
 # BASE_DENOMINATOR = 10000
 
-DATASET, unbounded_id = "top10nl_drenthe", 0
+# DATASET, unbounded_id = "top10nl_drenthe", 0
+# SRID = 28992
+# BASE_DENOMINATOR = 10000
+
+DATASET, unbounded_id = "top10nl_9x9", 0
 SRID = 28992
 BASE_DENOMINATOR = 10000
-
-#DATASET, unbounded_id = "top10nl_9x9", 0
-#SRID = 28992
-#BASE_DENOMINATOR = 10000
 
 # DATASET, unbounded_id = "clc_est", 0
 # SRID = 3035
@@ -111,15 +116,25 @@ BASE_DENOMINATOR = 10000
 # SRID = 32632
 # BASE_DENOMINATOR = 50000
 
-DO_SIMPLIFY = True
-
 OUTPUT_DATASET_NM = DATASET
 
-# some stats on what type of vertices for splitting areas
+# whether to perform line simplification on the edge geometries
+do_edge_simplification = True
+
+# whether to show detailed progress information
+# -- shows detailed progress on which face / edge is dealt with
+do_show_progress = False  # rename to do_show_trace?
+
+# whether to use the straight skeleton code as backend to generate new boundaries while splitting areas
+# -- FIXME: not operational yet (ids of nodes)
+do_use_grassfire = False
+
+# whether to check the edge geometries (polylines) for (self-) intersection during the process
+do_expensive_post_condition_check_simplify = True
+
+# some stats on what type of vertices are created while splitting areas
 STATS_SPLIT_VERTEX_TYPES = {0: 0, 1: 0, 2: 0, 3: 0}
 
-# show detailed progress on which face / edge is dealt with
-do_show_progress = False
 
 print(("Processing {}".format(DATASET)))
 
@@ -267,8 +282,16 @@ def main():
     print(f"{time.time()-t0:.3f}s priority indexed edges")
     face_step = 0
 
+    if do_expensive_post_condition_check_simplify:
+        t0 = time.time()
+        check_topology_edge_geometry(pp, list(pp.edges.keys()))
+        print(f"{time.time()-t0:.3f}s check edge topology (no segments intersecting)")
+
     #    check_vertices(pp)
-    if DO_SIMPLIFY:
+    if do_edge_simplification:
+        # FIXME: de-duplicate code of edge geometry simplification after other
+        # generalization operations (split/merge)
+
         print("starting initial edge generalization")
         t0 = time.time()
         edge_ids_for_simplify = []
@@ -283,8 +306,10 @@ def main():
         # as temporary fix, enter the faces / edge ids here that do
         # cause problems in the process (either they are skipped, or
         # generate debug information)
-        problematic_edge_ids = set([])
-        problematic_face_ids = set([])
+        problematic_edge_ids = set(
+            []
+        )  # 60329, 61045, 61121]) #16552]) #353, 453]) #[48815])
+        problematic_face_ids = set([])  # 4760, 4621, 6136, 7450, 4756, 7360])
         # problematic_face_ids = set([5930, 4930])# top10nl_9x9
         # problematic_face_ids = set([4531949])#drenthe
 
@@ -306,8 +331,8 @@ def main():
             needs_debug = edge_id in problematic_edge_ids
             if needs_debug:
                 output_pp_wkt(pp, "step")
-                input(f"face step - {op} - simplify - starting")
-            simplified_geom, eps = simplify.simplify(
+                input(f"simplify {edge_id} - starting")
+            simplified_geom, eps = simplify(
                 old_edge.geometry, pp, tolerance=small_eps, DEBUG=needs_debug
             )
             new_edge = Edge(
@@ -334,8 +359,7 @@ def main():
             edge_seq[edge_id] = eps  # _for_edge_geometry(simplified_geom)
             if needs_debug:
                 output_pp_wkt(pp, "step")
-                input(f"face step - {op} - simplify - replaced edge")
-
+                input(f"face step - simplify - replaced edge")
         #
         delta = time.time() - t0
 
@@ -345,6 +369,12 @@ def main():
                 len(edge_ids_for_simplify), small_eps
             )
         )
+        if do_expensive_post_condition_check_simplify:
+            t0 = time.time()
+            check_topology_edge_geometry(pp, list(pp.edges.keys()))
+            print(
+                f"{time.time()-t0:.3f}s check edge topology (no segments intersecting)"
+            )
         print(f" {delta:.3f}s simplified edges")
 
     t0 = time.time()
@@ -373,19 +403,23 @@ def main():
         ## - use merge and split in round robin fashion (merge, split, merge, ...)
         ## - it may also be better to split elongated water features
         ## - ...
+        op = "merge"
         if pp.faces[face_id].info["feature_class_id"] // 1000 in (10, 12):
             op = "split"
         else:
             op = "merge"
 
         # we do not apply split, if the face_id is in the set of problematic faces
-        if face_id in problematic_face_ids:
+        if face_id in problematic_face_ids:  # or face_step > 9000:
             op = "merge"
         if do_show_progress:
             print(f"\n#{face_step}")
 
-        if face_step == 10110:
-            output_pp_wkt(pp, "step")
+        #        if face_step == 6863:
+        #            output_pp_wkt(pp, "step")
+
+        #        if face_id in (19126,):
+        #            output_pp_wkt(pp, f"face_id__{face_id}")
 
         if op == "merge":
             #########################################################
@@ -418,6 +452,9 @@ def main():
             #########################################################
             # Split
             #            try:
+            denom_for_step = stepToScale.scale_for_step(face_step)
+            # determine line simplify threshold
+            cur_resolution = stepToScale.resolution_mpp(denom_for_step)
             new_face_id, new_edge_id, new_node_id = split_face(
                 face_id,
                 pp,
@@ -428,6 +465,7 @@ def main():
                 new_face_id,
                 new_edge_id,
                 new_node_id,
+                cur_resolution,
             )
         #            except ValueError:
         #                print('fallback to merge')
@@ -447,7 +485,7 @@ def main():
         #########################################################
         ### Find lines that are violating the threshold and simplify them
 
-        if DO_SIMPLIFY:
+        if do_edge_simplification:
             # which scale are we?
             denom_for_step = stepToScale.scale_for_step(face_step)
             # determine line simplify threshold
@@ -490,7 +528,7 @@ def main():
             #        print(cur_resolution, len(edge_ids_for_simplify), edge_ids_for_simplify)
             #        print("")
 
-            # DO_SIMPLIFY
+            # do_edge_simplification
 
             # FIXME: should we store the old edge before simplification?
             # -------> is an edge simplified over-and-over again?       <-------
@@ -518,10 +556,10 @@ def main():
                 needs_debug = edge_id in problematic_edge_ids
                 if needs_debug:
                     output_pp_wkt(pp, "step")
-                    input(f"face step - {op} - simplify - starting")
+                    input(f"simplify {edge_id} -- {op} - starting")
                 ##
 
-                simplified_geom, eps = simplify.simplify(
+                simplified_geom, eps = simplify(
                     old_edge.geometry, pp, tolerance=cur_resolution, DEBUG=needs_debug
                 )
                 # = simplified_geom
@@ -546,6 +584,12 @@ def main():
                 if needs_debug:
                     output_pp_wkt(pp, "step")
                     input(f"face step - {op} - simplify - replaced edge")
+
+            if do_expensive_post_condition_check_simplify:
+                # expensive post condition check for simplification:
+                # no intersections are present in the segments of the edges of the faces
+                # having a direct relation with the edges that were simplified
+                check_topology_edge_geometry(pp, edge_ids_for_simplify)
 
         ##            if edge_id in some:
         ##                print(edge_id, eps, len(simplified_geom))
@@ -616,8 +660,58 @@ def main():
     )
 
 
+def check_topology_edge_geometry(pp, edge_ids):
+    """Check for (self-) intersections of edge geometries"""
+    from .edge_simplify.intersection import (
+        as_segments,
+        segments_intersecting,
+        segments_intersection,
+    )
+
+    edge_ids = set(edge_ids)
+    raised = False
+    violations = []
+    for edge_id in edge_ids:
+        edge = pp.edges[edge_id]
+        left_face_id = parent(edge.left_face_id, pp.face_hierarchy)
+        right_face_id = parent(edge.right_face_id, pp.face_hierarchy)
+        segments_to_check = as_segments(edge.geometry)
+        check_edge_ids = set()
+        for neighbouring_edge_id in map(positive_id, pp.faces[left_face_id].edges):
+            if neighbouring_edge_id != edge_id:
+                check_edge_ids.add(neighbouring_edge_id)
+        for neighbouring_edge_id in map(positive_id, pp.faces[right_face_id].edges):
+            if neighbouring_edge_id != edge_id:
+                check_edge_ids.add(neighbouring_edge_id)
+        neighbouring_edge_geoms = []
+        for check_edge_id in check_edge_ids:
+            check_edge = pp.edges[check_edge_id]
+            if check_edge.geometry.envelope.intersects(edge.geometry.envelope):
+                neighbouring_edge_geoms.append(check_edge.geometry)
+        for polyline in neighbouring_edge_geoms:
+            segments_to_check.extend(as_segments(polyline))
+        try:
+            assert not segments_intersecting(segments_to_check)
+        except AssertionError:
+            raised = True
+            print(f"problem with edge {edge_id}")
+
+            pts = segments_intersection(segments_to_check)
+            violations.extend(pts)
+
+    if raised:
+        output_pp_wkt(pp, "topology_violations")
+        with open("/tmp/topology_violations.wkt", "w") as fh:
+            fh.write("wkt")
+            fh.write("\n")
+            for pt in violations:
+                fh.write(f"POINT({pt[0]} {pt[1]})")
+                fh.write("\n")
+        raise ValueError("Topology violated: Edge segments intersect")
+
+
 def normalize_seconds(seconds):
-    """
+    """Returns how many days, hours, minutes & seconds there are in a total number of seconds
     """
     (days, remainder) = divmod(seconds, 86400)
     (hours, remainder) = divmod(remainder, 3600)
@@ -649,7 +743,7 @@ def find_best_neighbour(face_id, pp):
     # could look at
     # * resulting shape measure, would the merge lead to a compact polygon?
     # * compatible faces in the surroundings
-    # * continuation of edges / linear features 
+    # * continuation of edges / linear features
     neighbour_id = None
     # always increment face step <> (otherwise scale is not determined ok)
     # also, if we do not have a candidate neighbour area for merging with!
@@ -731,6 +825,7 @@ def split_face(
     new_face_id,
     new_edge_id,
     new_node_id,
+    resolution,
 ):
     #    if face_id == 301:
     #        output_pp_wkt(pp, 'split301')
@@ -868,12 +963,18 @@ def split_face(
         # print(info)
         converter.add_point(v, info=info)
 
+    from splitarea.densify import densify
+
+    densified_geometry = {}
+    for edge_id in edge_ids_in_wheel:
+        densified_geometry[edge_id] = densify(pp.edges[edge_id].geometry)
+
     for edge_id in edge_ids_in_wheel:
         edge = pp.edges[edge_id]
         lf_id = parent(edge.left_face_id, pp.face_hierarchy)
         rf_id = parent(edge.right_face_id, pp.face_hierarchy)
-        # go over the geometry
-        for pt in edge.geometry[1:-1]:
+        # go over the geometry (but not the end points)
+        for pt in densified_geometry[edge_id][1:-1]:  ##edge.geometry[1:-1]:
             v = (pt.x, pt.y)
             tp = 0
             node = None
@@ -884,7 +985,7 @@ def split_face(
 
     for edge_id in edge_ids_in_wheel:
         edge = pp.edges[edge_id]
-        tmp = [(pt.x, pt.y) for pt in edge.geometry]
+        tmp = [(pt.x, pt.y) for pt in densified_geometry[edge_id]]  # edge.geometry]
         for pair in zip(tmp, tmp[1:]):
             converter.add_segment(pair[0], pair[1])
 
@@ -924,80 +1025,106 @@ def split_face(
     except AssertionError:
         raise
 
-    #    use_grassfire = True
-    #    #    try:
-    #    if use_grassfire:
-    #        # use grassfire
-    #        from grassfire import calc_skel
+    #    try:
+    if do_use_grassfire:
+        # use grassfire
+        from grassfire import calc_skel
 
-    #        skel = calc_skel(converter, shrink=True, internal_only=True)
+        skel = calc_skel(converter, shrink=True, internal_only=True)
 
-    #        class GrassfireSegments:
-    #            def __init__(self, skel):
-    #                self.skel = skel
-    #                self.segments = []
-    #                self.ext_segments = []
-    #                self.produce_segments()
+        class GrassfireVertexInfo:
+            def __init__(self, tp, face_ids, vertex_id):
+                self.type = tp
+                self.face_ids = face_ids
+                self.vertex_id = vertex_id
 
-    #            def produce_segments(self):
-    #                from simplegeom.geometry import Point
+        class GrassfireTemporaryVertex:
+            def __init__(self, pt, info):
+                self.x, self.y = pt[0], pt[1]
+                self.info = info
 
-    #                for segment in skel.segments():
-    ##                    print(segment)
-    #                    (start, end), (start_info, end_info), = segment
-    #                    # see harvest.py in splitarea
-    #                    # TYPE 0
-    #                    # Intermediate vertex on an edge, no need to make connection to this
-    #                    # node
-    #                    #
-    #                    # TYPE 1
-    #                    # node in topology, there needs to be made a connection to this node
-    #                    # => vertex_id is the node_id of the topology
-    #                    #
-    #                    # TYPE 2
-    #                    # E.g. Hole that needs to be dissolved completely, but for that we need
-    #                    # to propagate same label on the whole skeleton!
-    #                    # => face_ids is integer of the face that forms the hole
-    #                    #
-    #                    # TYPE 3
-    #                    # for touching rings, we need to have a node sector list:
-    #                    # angles that bound a certain face, so that we can get the correct face
-    #                    # that overlaps
-    #                    # => face_ids is list with 'node sectors', describing which face is valid for
-    #                    #    which part around the node (based on start and end angle of that sector)
-    #                    if start_info is not None:
-    ##                        print(start_info.type * "*")
+        class GrassfireSegments:
+            def __init__(self, skel):
+                self.skel = skel
+                self.segments = []
+                self.ext_segments = []
+                self._produce_segments()
 
-    #                        # top10nl_9x9 (not many touching rings -- really execptional case)
-    #                        # {0: 23595, 1: 19778, 2: 157, 3: 0}
+            def _produce_segments(self):
+                """ produce the segments (will be called by constructor) """
+                from simplegeom.geometry import Point
 
-    #                        SPLIT_VERTEX_TYPES[start_info.type] += 1
-    #                        v0 = Point(start[0], start[1])
-    #                        v1 = Point(end[0], end[1])
-    #                        lf, rf = None, None
-    #                        self.ext_segments.append((v0, v1, lf, rf))
-    #                    else:
-    #                        v0 = Point(start[0], start[1])
-    #                        v1 = Point(end[0], end[1])
-    #                        self.segments.append((v0, v1))
+                do_output = True
+                if do_output:
+                    with open("/tmp/nodes_gf.wkt", "w") as fh:
+                        fh.write("wkt;info\n")
 
-    #        visitor = GrassfireSegments(skel)
-    #        if False:
-    #            with open("/tmp/skel2.wkt", "w") as fh:
-    #                fh.write("wkt\n")
-    #                for seg in visitor.ext_segments:
-    #                    fh.write(
-    #                        "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
-    #                    )
+                for segment in skel.segments():
+                    #                    print(segment)
+                    (start, end), (start_info, end_info), = segment
+                    # see harvest.py in splitarea
+                    # TYPE 0
+                    # Intermediate vertex on an edge, no need to make connection to this
+                    # node
+                    #
+                    # TYPE 1
+                    # node in topology, there needs to be made a connection to this node
+                    # => vertex_id is the node_id of the topology
+                    #
+                    # TYPE 2
+                    # E.g. Hole that needs to be dissolved completely, but for that we need
+                    # to propagate same label on the whole skeleton!
+                    # => face_ids is integer of the face that forms the hole
+                    #
+                    # TYPE 3
+                    # for touching rings, we need to have a node sector list:
+                    # angles that bound a certain face, so that we can get the correct face
+                    # that overlaps
+                    # => face_ids is list with 'node sectors', describing which face is valid for
+                    #    which part around the node (based on start and end angle of that sector)
+                    if start_info is not None:
+                        # top10nl_9x9 (not many touching rings -- really execptional case)
+                        # {0: 23595, 1: 19778, 2: 157, 3: 0}
+                        #                        if start_info.type == 0:
+                        #                            continue
 
-    #            with open("/tmp/skel3.wkt", "w") as fh:
-    #                fh.write("wkt\n")
-    #                for seg in visitor.segments:
-    #                    fh.write(
-    #                        "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
-    #                    )
-    #            output_pp_wkt(pp, "split_problem")
-    #            input('paused after grassfire')
+                        STATS_SPLIT_VERTEX_TYPES[start_info.type] += 1
+                        v0 = Point(start[0], start[1])
+                        v1 = Point(end[0], end[1])
+                        lf, rf = None, None
+                        if do_output:
+                            with open("/tmp/nodes_gf.wkt", "a") as fh:
+                                fh.write(f"{v0};{start_info}\n")
+
+                        self.ext_segments.append((v0, v1, lf, rf))
+                    else:
+                        #                        v0 = Point(start[0], start[1])
+                        #                        v1 = Point(end[0], end[1])
+                        v0 = GrassfireTemporaryVertex(
+                            start, GrassfireVertexInfo(None, None, None)
+                        )
+                        v1 = GrassfireTemporaryVertex(
+                            end, GrassfireVertexInfo(None, None, None)
+                        )
+                        self.segments.append((v0, v1))
+
+        visitor = GrassfireSegments(skel)
+        if True:
+            with open("/tmp/skel2.wkt", "w") as fh:
+                fh.write("wkt\n")
+                for seg in visitor.ext_segments:
+                    fh.write(
+                        "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
+                    )
+
+            with open("/tmp/skel3.wkt", "w") as fh:
+                fh.write("wkt\n")
+                for seg in visitor.segments:
+                    fh.write(
+                        "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
+                    )
+            output_pp_wkt(pp, "split_problem")
+            input("paused after grassfire")
     if (
         True
     ):  # FIXME: replace to else: of use_grassfire condition, once making a graph for that works!
@@ -1063,7 +1190,7 @@ def split_face(
 
         if len(interior) == 0:
             raise NotImplementedError(
-                "fix the simplification, or enable this workaround - which is not well functioning"
+                "no triangles in the interior of the shape -- fix the line simplification, or enable this workaround - which is not well functioning"
             )
             # no triangles in the interior -- workaround for simplification allowing
             # collapse of edges on top of each other -- to be removed once simplification
@@ -1196,13 +1323,13 @@ def split_face(
         # Harvest the segments
 
         # we can choose, which type of skeleton segments
-        #            Harvester = MidpointHarvester 
+        #            Harvester = MidpointHarvester
         # FIXME: using the midpointharvester Can lead to topology problems,
         # because segments might go outside of the original polygon boundaries,
         # in case there exists a sharp and narrow turn in the polygon
         # (but it does give a nicer, = less jaggy, less sharp angles, center line
         Harvester = EdgeEdgeHarvester
-        #Harvester = MidpointHarvester
+        # Harvester = MidpointHarvester
         # get centerline segments
         visitor = Harvester(interior)
         visitor.skeleton_segments()
@@ -1224,42 +1351,42 @@ def split_face(
     skeleton, new_edge_id = make_graph(
         ext, visitor, new_edge_id, universe_id=unbounded_id, srid=SRID
     )
-    if False:  # face_id == 301:
+
+    if False:  # face_id == 19126:
         with open("/tmp/out_all_raised.wkt", "w") as fh, open(
             "/tmp/out_edges_raised.wkt", "w"
         ) as fhe, open("/tmp/out_it_raised.wkt", "w") as fhit, open(
             "/tmp/out_vertices.wkt", "w"
-        ) as fhv, open(
-            "/tmp/ext_edges.wkt", "w"
-        ) as fhext:
+        ) as fhv:
+            #        , open(
+            #            "/tmp/ext_edges.wkt", "w"
+            #        ) as fhext:
             print("visited", it.visited)
             output_triangles(dt.triangles, fh)
-            output_triangles(it.visited, fhit)
+            output_triangles(interior, fhit)
             output_edges(FiniteEdgeIterator(dt, constraints_only=True), fhe)
             output_vertices(dt.vertices, fhv)
 
-            # output_external edges
-            fhext.write("id;sn;sa;lf;rf;wkt\n")
-            for edge in ext:
-                fhext.write(";".join(map(str, edge)))
-                fhext.write("\n")
+        #            # output_external edges
+        #            fhext.write("id;sn;sa;lf;rf;wkt\n")
+        #            for edge in ext:
+        #                fhext.write(";".join(map(str, edge)))
+        #                fhext.write("\n")
 
-        with open("/tmp/skel2.wkt", "w") as fh:
-            fh.write("wkt\n")
-            for seg in visitor.ext_segments:
-                fh.write(
-                    "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
-                )
+        #        with open("/tmp/skel2.wkt", "w") as fh:
+        #            fh.write("wkt\n")
+        #            for seg in visitor.ext_segments:
+        #                fh.write(
+        #                    "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
+        #                )
 
-        with open("/tmp/skel3.wkt", "w") as fh:
-            fh.write("wkt\n")
-            for seg in visitor.segments:
-                fh.write(
-                    "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
-                )
-
-        output_topomap_wkt(skeleton, "pre_label")
-        input("paused")
+        #        with open("/tmp/skel3.wkt", "w") as fh:
+        #            fh.write("wkt\n")
+        #            for seg in visitor.segments:
+        #                fh.write(
+        #                    "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
+        #                )
+        input("triangles for split stored")
 
     label_sides(skeleton)
 

@@ -1,4 +1,4 @@
-from . import pqdict
+from .. import pqdict
 
 from math import fabs
 from operator import itemgetter
@@ -124,7 +124,7 @@ def simplify(line, pp, tolerance=float("inf"), DEBUG=False):
         # if we find less than 3, there is a problem
         # - either this is a degenerate line (with multiple vertices on same
         #   location) -> should be solved while reading the data
-        # - or there exists a problem/bug with the quadtree/keeping it up to date 
+        # - or there exists a problem/bug with the quadtree/keeping it up to date
         #   -> point not added in the tree, or the intersection method is
         #      not performing ok...
         #
