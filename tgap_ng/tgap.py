@@ -104,7 +104,7 @@ import sys
 # SRID = 28992
 # BASE_DENOMINATOR = 10000
 
-DATASET, unbounded_id = "top10nl_9x9", 0
+DATASET, unbounded_id = "top10nl_limburg_tiny", 0
 SRID = 28992
 BASE_DENOMINATOR = 10000
 
@@ -203,7 +203,7 @@ print(("Processing {}".format(DATASET)))
 #                edge_ids.add(edge_id)
 #        return edge_ids
 
-
+#ALEX: NOT USED?
 def check_vertices(pp):
     print("checking vertices")
     ### BEGIN vertex check ###
@@ -242,6 +242,7 @@ def main():
 
     t0 = time.time()
     pp = retrieve(DATASET, SRID, unbounded_id)
+    #print(f'Test Alex: {pp}')
     print(f"{time.time()-t0:.3f}s retrieved data from DBMS")
 
     stepToScale = scalestep.ScaleStep(BASE_DENOMINATOR, DATASET)
@@ -288,6 +289,9 @@ def main():
         print(f"{time.time()-t0:.3f}s check edge topology (no segments intersecting)")
 
     #    check_vertices(pp)
+    problematic_edge_ids = set([])  # 60329, 61045, 61121]) #16552]) #353, 453]) #[48815])
+    problematic_face_ids = set([])  # 4760, 4621, 6136, 7450, 4756, 7360])
+    
     if do_edge_simplification:
         # FIXME: de-duplicate code of edge geometry simplification after other
         # generalization operations (split/merge)
@@ -306,10 +310,7 @@ def main():
         # as temporary fix, enter the faces / edge ids here that do
         # cause problems in the process (either they are skipped, or
         # generate debug information)
-        problematic_edge_ids = set(
-            []
-        )  # 60329, 61045, 61121]) #16552]) #353, 453]) #[48815])
-        problematic_face_ids = set([])  # 4760, 4621, 6136, 7450, 4756, 7360])
+
         # problematic_face_ids = set([5930, 4930])# top10nl_9x9
         # problematic_face_ids = set([4531949])#drenthe
 

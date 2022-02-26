@@ -212,7 +212,7 @@ def angle(orig, dest):
 
 def dist(pa, pb):
     dx = pb[0] - pa[0]
-    dy = pb[1] - pb[1]
+    dy = pb[1] - pa[1]
     return (dx ** 2 + dy ** 2) ** 0.5
 
 
@@ -250,6 +250,7 @@ def retrieve(DATASET, SRID, unbounded_id):
     pp.faces[unbounded_id] = Face(unbounded_id, dataset_envelope, None, set([]), {})
     pp.face_hierarchy[unbounded_id] = None
 
+    #print(f'Alex test: faces: {pp.faces}')
     faces = pp.faces
     face_hierarchy = pp.face_hierarchy
     edge_hierarchy = pp.edge_hierarchy
@@ -276,6 +277,7 @@ def retrieve(DATASET, SRID, unbounded_id):
             face_hierarchy[face_id] = None
 
     print(f"{time.time()-t0:.3f}s face retrieval: {len(faces)} faces")
+    #print(f"Alex Test: {faces[1019]}")
     t0 = time.time()
 
     edges = pp.edges
@@ -333,6 +335,7 @@ def retrieve(DATASET, SRID, unbounded_id):
             faces[right_face_id].edges.add(~edge_id)
             edge_hierarchy[edge_id] = None
     print(f"{time.time()-t0:.3f}s edge retrieval: {len(edges)} edges")
+    print(f"Alex Test: {faces[1019]}")
     t0 = time.time()
     # DO_SIMPLIFY
 
@@ -614,6 +617,7 @@ def dissolve_unwanted_nodes(pp):
         star = node.star
 #    for node_id, star in pp.stars.items():
         if len(star) == 2 and len(set(map(positive_id, star))) == 2:
+            #print(f"Alex Test: node dissolved: {node_id}, {node}")
             pair = tuple(map(positive_id, star))
             dissolve.append((node_id, pair))
 
