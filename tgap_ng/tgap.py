@@ -17,6 +17,7 @@ import logging
 import sys
 
 # logging is used inside connection + grassfire (split), we can set the level here
+
 logging.basicConfig(level=logging.FATAL)
 import pprint
 
@@ -84,7 +85,8 @@ from contextlib import closing
 
 # FIXME: make possible to use both, dependent on line?
 # from .edge_simplify.visvalingham_whyatt import simplify
-from .edge_simplify.reumann_witkam import simplify_reumann_witkam as simplify
+#from .edge_simplify.reumann_witkam import simplify_reumann_witkam as simplify
+from .edge_simplify.samsonov_yakimova import simplifySY as simplify
 
 import sys
 
@@ -226,7 +228,7 @@ def check_vertices(pp):
         input("missing vertices in quadtree")
     ### END vertex check ###
 
-
+#NOTE: I will comment out all the return DB-related operations using #DB, so that I can test without messing with the DB (at first)
 def main():
     import time
 
@@ -333,8 +335,11 @@ def main():
             if needs_debug:
                 output_pp_wkt(pp, "step")
                 input(f"simplify {edge_id} - starting")
+            # simplified_geom, eps = simplify(
+            #     old_edge.geometry, pp, tolerance=small_eps, DEBUG=needs_debug
+            # )
             simplified_geom, eps = simplify(
-                old_edge.geometry, pp, tolerance=small_eps, DEBUG=needs_debug
+                old_edge, pp, small_eps
             )
             new_edge = Edge(
                 old_edge.id,
@@ -495,6 +500,7 @@ def main():
             # check, if we do the reverse (scale to step), we end up at the step
             step_denom = stepToScale.step_for_scale(denom_for_step)
 
+            print(f"denom_for_step: {denom_for_step}, step_denom: {step_denom}, cur_res: {cur_resolution}")
             # simplify lines, store and replace their geometries
             edge_ids_for_simplify = []
             for _ in range(len(edge_seq)):
