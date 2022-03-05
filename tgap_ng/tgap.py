@@ -16,6 +16,10 @@
 import logging
 import sys
 
+
+from geopandas import geoseries, GeoSeries #module & class?
+from shapely import errors as shpErr, geometry
+
 # logging is used inside connection + grassfire (split), we can set the level here
 
 logging.basicConfig(level=logging.FATAL)
@@ -89,6 +93,7 @@ from contextlib import closing
 from .edge_simplify.samsonov_yakimova import simplifySY as simplify
 
 import sys
+
 
 
 # FIXME:
@@ -246,6 +251,21 @@ def main():
     pp = retrieve(DATASET, SRID, unbounded_id)
     #print(f'Test Alex: {pp}')
     print(f"{time.time()-t0:.3f}s retrieved data from DBMS")
+
+    pdGeom: dict = {} #key - id, value - GeoSeries object
+
+    #convert geometry to GeoSeries
+    for edgeId in pp.edges:
+        try:
+            wktGeom = pp.edges[edgeId].geometry.wkt
+            newGeom: GeoSeries = GeoSeries.from_wkt([wktGeom])
+            
+            pdGeom[edgeId] = newGeom
+            print(pp.edges[edgeId].geometry)
+        except shpErr.WKTReadingError as e:
+            print(e)
+
+    #print(pdGeom)
 
     stepToScale = scalestep.ScaleStep(BASE_DENOMINATOR, DATASET)
     current_denominator = stepToScale.scale_for_step(0)

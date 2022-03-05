@@ -1,5 +1,7 @@
 from tgap_ng.datastructure import PlanarPartition
 
+from geopandas import GeoSeries
+
 def simplifySY(edgeToBeSimplified, pp: PlanarPartition, tolerance, DEBUG = False):
     """
     Method used for simplifying a polyline having characteristics of man-made structures 
@@ -13,12 +15,12 @@ def simplifySY(edgeToBeSimplified, pp: PlanarPartition, tolerance, DEBUG = False
     """
     print("Entered SY Simplification Module")
 
-    for line in edgeToBeSimplified.geometry:
-        print("Lines:" ,line)
+    # for line in edgeToBeSimplified.geometry:
+    #     print("Lines:" ,line)
 
     #convert geometry.wkt to Shapely LineString object
-    wktGeom= edgeToBeSimplified.geometry.wkt
-
+    geom =  edgeToBeSimplified.geometry
+    gs = GeoSeries()
 
 
     return [None, None]
