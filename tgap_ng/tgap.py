@@ -16,9 +16,9 @@
 import logging
 import sys
 
-
+import matplotlib
 from geopandas import geoseries, GeoSeries #module & class?
-from shapely import errors as shpErr, geometry
+from shapely import errors as shpErr, geometry, wkt
 
 # logging is used inside connection + grassfire (split), we can set the level here
 
@@ -252,20 +252,31 @@ def main():
     #print(f'Test Alex: {pp}')
     print(f"{time.time()-t0:.3f}s retrieved data from DBMS")
 
-    pdGeom: dict = {} #key - id, value - GeoSeries object
+    shpGeomDict: dict = {} #key - id, value - GeoSeries object
 
     #convert geometry to GeoSeries
+    # for edgeId in pp.edges:
+    #     try:
+    #         wktGeom = pp.edges[edgeId].geometry.wkt
+    #         newGeom: GeoSeries = shp.from_wkt([wktGeom])
+            
+    #         pdGeom[edgeId] = newGeom
+    #         print(pp.edges[edgeId].geometry)
+    #     except shpErr.WKTReadingError as e:
+    #         print(e)
+
+    #convert geometry to shapely LineString
     for edgeId in pp.edges:
         try:
-            wktGeom = pp.edges[edgeId].geometry.wkt
-            newGeom: GeoSeries = GeoSeries.from_wkt([wktGeom])
-            
-            pdGeom[edgeId] = newGeom
-            print(pp.edges[edgeId].geometry)
-        except shpErr.WKTReadingError as e:
-            print(e)
+            shpGeom = wkt.loads(pp.edges[edgeId].geometry.wkt)
+            #print(shpGeom)
 
-    #print(pdGeom)
+            shpGeomDict[edgeId] = shpGeom
+
+        except shpErr.WKTReadingError as err:
+            print(f"Error while transforming the geom.wkt to shp LineString: {err}")
+
+    print(shpGeomDict)
 
     stepToScale = scalestep.ScaleStep(BASE_DENOMINATOR, DATASET)
     current_denominator = stepToScale.scale_for_step(0)

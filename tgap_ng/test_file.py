@@ -6,29 +6,54 @@ from .datastructure import retrieve
 from shapely import errors as shErr
 from shapely.geometry import LineString
 
-import matplotlib
+import matplotlib.pyplot as plt
 
 DATASET, unbounded_id = "top10nl_limburg_tiny", 0
 SRID = 28992
 BASE_DENOMINATOR = 10000
 
 def testGeoSeriesIntersection():
-    #test to see how intersections can be detected using GeoSeries
+    # test to see how intersections can be detected using GeoSeries
     ls1 = LineString([(1.0, 1.0), (3.0, 3.0)])
     ls2 = LineString([(1.0, 3.0), (3.0, 1.0)])
     ls3 = LineString([(1.0, 1.0), (1.0, 3.0)])
-    ls4 = LineString([(1.0, 3.0), (3.0, 3.0)])
+    ls4 = LineString([(3.0, 1.0), (3.0, 3.0)])
 
-    #initialize the geoseries of both intersecting and non-intersecting pairs of lines
-    geom1 = GeoSeries([ls1])
-    geom2 = GeoSeries([ls2])
-    geom3 = GeoSeries([ls3])
-    geom4 = GeoSeries([ls4])
+    # Compare line pairs. The result should be as follows:
+    # l1 x l2 -> intersects (true)
+    # l3 x l4 -> not (false)
+    # l1 x l3 (or l2 x l4, ...) -> one common point -> ?
+    print(f"l1 x l2 -> {ls1.intersection(ls2)}")
+    print(f"l3 x l4 -> {ls3.intersection(ls4)}")
+    print(f"l1 x l2 -> {ls1.intersection(ls3)}")
 
-    geom1.plot()
-    geom2.plot()
-    geom3.plot()
-    geom4.plot()
+    #NOTE: Findings (good to remember!) .intersection returns the point(s) where the two linestrings intersect.
+
+    print("Stop Debug")
+    # initialize the geoseries of both intersecting and non-intersecting pairs of lines
+    # NOTE: GeoSeries seems to be good when it comes to grouping together multiple polylines
+    # Might be useful in our case, by grouping together all polylines/edges, maybe it will be easier for our operations.
+    # However, this might mean changing the implementation (i.e. how edges are treated in our PlanarPartition)
+    # geom1 = GeoSeries([ls1])
+    # geom2 = GeoSeries([ls2])
+    # geom3 = GeoSeries([ls3])
+    # geom4 = GeoSeries([ls4])
+
+    # Plot to see the lines (separate plots since they're different geoseries)
+    # geom1.plot()
+    # geom2.plot()
+    # geom3.plot()
+    # geom4.plot()
+
+    # plt.show()
+
+    # Comparing the GeoSeries
+    # res = geom1.intersects(geom2.geometry)
+    # print(f"l1 x l2 -> {res}")
+    # print(f"l3 x l4 -> {geom3.intersects(geom4.geometry)}")
+    # print(f"l1 x l3 -> {geom1.intersects(geom3.geometry)}")
+
+
 
 
 def testGeopandasStrucutre():
@@ -66,11 +91,15 @@ def testGeopandasStrucutre():
         except shErr.WKTReadingError as e:
             print(e)
 
+
 def main():
+    """
+    I use this script to test out how different libraries such as Shapely and GeoPandas work. 
+    """
     #testGeopandasStrucutre()
     testGeoSeriesIntersection()
 
-    print("got here")
+    print("Ended execution of selected test functions")
 
 
 if __name__ == "__main__":
