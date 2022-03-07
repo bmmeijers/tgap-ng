@@ -30,6 +30,7 @@ def testGeoSeriesIntersection():
     #NOTE: Findings (good to remember!) .intersection returns the point(s) where the two linestrings intersect.
 
     print("Stop Debug")
+
     # initialize the geoseries of both intersecting and non-intersecting pairs of lines
     # NOTE: GeoSeries seems to be good when it comes to grouping together multiple polylines
     # Might be useful in our case, by grouping together all polylines/edges, maybe it will be easier for our operations.
@@ -52,8 +53,6 @@ def testGeoSeriesIntersection():
     # print(f"l1 x l2 -> {res}")
     # print(f"l3 x l4 -> {geom3.intersects(geom4.geometry)}")
     # print(f"l1 x l3 -> {geom1.intersects(geom3.geometry)}")
-
-
 
 
 def testGeopandasStrucutre():

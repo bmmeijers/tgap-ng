@@ -276,8 +276,8 @@ def main():
         except shpErr.WKTReadingError as err:
             print(f"Error while transforming the geom.wkt to shp LineString: {err}")
 
-    print(shpGeomDict)
-
+    #print(shpGeomDict)
+    
     stepToScale = scalestep.ScaleStep(BASE_DENOMINATOR, DATASET)
     current_denominator = stepToScale.scale_for_step(0)
     print(f"Scale denominator: 1:{current_denominator}")
@@ -370,7 +370,7 @@ def main():
             #     old_edge.geometry, pp, tolerance=small_eps, DEBUG=needs_debug
             # )
             simplified_geom, eps = simplify(
-                old_edge, pp, small_eps
+                old_edge, pp, small_eps, gpdGeom=shpGeomDict
             )
             new_edge = Edge(
                 old_edge.id,
