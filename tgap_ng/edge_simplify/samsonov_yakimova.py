@@ -14,6 +14,8 @@ from math import sqrt, pow
 class endSegCath(IntEnum):
     START_SEG = 0
     FINAL_SEG = 1
+    SECOND_SEG = 2
+    SECOND_TO_LAST = 3
 
 def createPoint(x,y) -> geometry.Point:
     return geometry.Point(x,y)
@@ -152,7 +154,7 @@ def plotShpLS(line: geometry.LineString, color: str):
 
 def simplifySY(edgeToBeSimplified, pp: PlanarPartition, tolerance, DEBUG = False, gpdGeom = None):
     """
-    Method used for simplifying a polyline having characteristics of man-made structures 
+    Method used for simplifying a polyline having characteristics of man-made structures
     (i.e. orthogonal turns inbetween segments)
 
     Simplification based on the paper "Shape-Adaptive Geometric Simplification of Heterogeneous Line Datasets"
@@ -191,7 +193,7 @@ def simplifySY(edgeToBeSimplified, pp: PlanarPartition, tolerance, DEBUG = False
         print(f"Polyline {geom} can't be simplifed any further, as it already has less than 4 segments")
         return # nothing we can do more, continue to next line
     if isEndSeg is not None:
-        # ENDPOINT Simplification ffrom SY
+        # ENDPOINT Simplification from SY
         # We have to simplify either the first or the last segment
 
         if isEndSeg == endSegCath.START_SEG:
