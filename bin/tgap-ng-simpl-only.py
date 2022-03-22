@@ -31,4 +31,20 @@ if __name__ == '__main__':
     edge5303 = pp.edges[5303] #closed, highly angular structure
     edge8757 = pp.edges[8757]
 
-    simplifySY(edge5303, pp, 0, gpdGeom= shpGeomDict)
+    simpl1 = simplifySY(edge5303, pp, 0, gpdGeom= shpGeomDict)
+    shpGeomDict[5303] = wkt.loads(simpl1.geometry.wkt) #change the geometry in shpGeomDict
+
+    simpl2 = simplifySY(simpl1, pp, 0, gpdGeom= shpGeomDict)
+    shpGeomDict[5303] = wkt.loads(simpl2.geometry.wkt) 
+
+    simpl3 = simplifySY(simpl2, pp, 0, gpdGeom= shpGeomDict)
+    shpGeomDict[5303] = wkt.loads(simpl3.geometry.wkt)
+
+    simpl4 = simplifySY(simpl3, pp, 0, gpdGeom= shpGeomDict)
+    shpGeomDict[5303] = wkt.loads(simpl4.geometry.wkt)
+
+    simpl5 = simplifySY(simpl4, pp, 0, gpdGeom= shpGeomDict)
+    shpGeomDict[5303] = wkt.loads(simpl5.geometry.wkt)
+
+    simpl6 = simplifySY(simpl5, pp, 0, gpdGeom= shpGeomDict)
+    shpGeomDict[5303] = wkt.loads(simpl6.geometry.wkt)
