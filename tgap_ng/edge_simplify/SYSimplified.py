@@ -189,7 +189,7 @@ def returnIndexesOfSearchedElems(listToBeSearched: list, queryKeywords: list) ->
     return resultDict
     
  
-def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG = False, gpdGeom = None):
+def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG = False, gpdGeom = None):
     """
     Method used for simplifying a polyline having characteristics of man-made structures
     (i.e. orthogonal turns inbetween segments)
@@ -281,7 +281,6 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
                     if isCircular:
                         operToApplyToSegList[0] = Operations.SEG_EXTEND_START
                     else:
-                        operToApplyToSegList[smlstSegId] = Operations.REMOVE
                         operToApplyToSegList[smlstSegId+1] = Operations.PT_EXTEND_END
         except IndexError as idxErr:
             # In this case, our shortest segment is the last one in the polyline. If the line is circular
@@ -312,7 +311,6 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
                     if isCircular:
                         operToApplyToSegList[segmentListLength-1] = Operations.SEG_EXTEND_END
                     else:
-                        operToApplyToSegList[smlstSegId] = Operations.REMOVE
                         operToApplyToSegList[smlstSegId-1] = Operations.PT_EXTEND_START
         else:
             # This is the case where our shortest segment is the first one in the list (Idx_0)
@@ -468,23 +466,23 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
 
             #
             ptsList.append(intersPt)
-            intersPtIdx = len(ptsList) - 1 #last one added to the list
+            intersPt_extdStartIdx = len(ptsList) - 1 #last one added to the list
 
 
             for operIdx in range(0,len(operToApplyToSegList)):
                 oper = operToApplyToSegList[operIdx]
-                if oper is Operations.KEEP or oper is Operations.SEG_EXTEND_END:
+                if oper is (Operations.KEEP or Operations.SEG_EXTEND_END):
                     newSegListPtStartOper.append(segList[operIdx])
                     continue
 
                 if oper is Operations.SEG_EXTEND_START:
                     oldSeg: Segment = segList[operIdx]
-                    newSeg = Segment(intersPtIdx, oldSeg.endId)
+                    newSeg = Segment(intersPt_extdStartIdx, oldSeg.endId)
                     newSegListPtStartOper.append(newSeg)
                     continue
 
                 if oper is Operations.REPLACE:
-                    newSeg = Segment(extendSegEnd.endId, intersPtIdx)
+                    newSeg = Segment(extendSegEndIdx, intersPt_extdStartIdx)
                     newSegListPtStartOper.append(newSeg)
                     continue
 
@@ -538,48 +536,4 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
         return convertSegListToSimplGeomLS(newSegListPtStartOper, ptsList, edgeToBeSimplified)
 
     if ExtendNeighToPointEndFlag:
-        # In this case, we have to remove the first segment in our LineString.
-        # We will create a new segment from the starting point until the perpendicular to the segment to extend
-
-        # TODO: This is copy-pasted from above, might 
-        extendSegEndIdx = simplConfigOper[1][0]
-        extendPointEndIdx = simplConfigOper[3][0]
-
-        extendSegEnd: Segment = segList[extendSegEndIdx]
-        extendPointEnd: Segment = segList[extendPointEndIdx]
-
-        #retrieve coordinates
-        # coords of the segment to be extended from the START
-        extdEndSegP1: shpPoint = shpPtList[extendSegEnd.startId]
-        extdEndSegP2: shpPoint = shpPtList[extendSegEnd.endId]
-
-        extdEndPointP1: shpPoint = shpPtList[extendPointEnd.startId]
-        extdEndPointP2: shpPoint = shpPtList[extendPointEnd.endId]
-
-        extdSegLineEq: LineEquation = LineEquation(extdEndSegP1, extdEndSegP2)
-
-        intersPt = perpendicularIntersectionPointToLine(extdEndPointP2,extdSegLineEq)
-
-        #
-        newSegListPtStartOper = []
-
-        ptsList.append(intersPt)
-        intersPt_extdStartIdx = len(ptsList) - 1 #last one added to the list
-
-
-        for operIdx in range(0,len(operToApplyToSegList)):
-            oper = operToApplyToSegList[operIdx]
-            if oper is Operations.KEEP:
-                newSegListPtStartOper.append(segList[operIdx])
-
-            if oper is Operations.SEG_EXTEND_END:
-                oldSeg: Segment = segList[operIdx]
-                newSeg = Segment(oldSeg.startId, intersPt_extdStartIdx)
-                newSegListPtStartOper.append(newSeg)
-
-            if oper is Operations.PT_EXTEND_END:
-                oldSeg: Segment = segList[operIdx]
-                newSeg = Segment(intersPt_extdStartIdx, oldSeg.endId)
-                newSegListPtStartOper.append(newSeg)
-
-        return convertSegListToSimplGeomLS(newSegListPtStartOper, ptsList, edgeToBeSimplified)
+        pass
