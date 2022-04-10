@@ -1,13 +1,13 @@
 from enum import IntEnum
 from tgap_ng.datastructure import PlanarPartition, Edge
 
-from shapely import wkt
+from shapely import wkt, errors as shpErr
 from shapely.geometry import Point as shpPoint, LineString as shpLS
 from simplegeom import geometry as simplgeom
 
 import matplotlib.pyplot as plt
 
-from tgap_ng.datastructure import angle
+from tgap_ng.datastructure import angle, eps_for_edge_geometry
 
 from math import sqrt, pow
 
@@ -25,6 +25,8 @@ class Operations(IntEnum):
     KEEP = 4
     REMOVE = 5
     REPLACE = 6
+
+    REMOVE_POINTS_QUADTREE = 7
 
 def createPoint(x,y) -> shpPoint:
     return shpPoint(x,y)
@@ -67,28 +69,93 @@ class LineEquation:
         arg1 = args[0]
         arg2 = args[1]
 
+        self.isHorizontal = False
+        self.isVertical = False
+
         # CONSTRUCTOR OVERLOADING
         if isinstance(arg1, shpPoint) and isinstance(arg2, shpPoint):
             # Slope = (y2 - y1)/(x2 - x1)
             # Y-intercept = (x1*(y1-y2))/(x2-x1) + y1
-            self.slope = (arg2.y - arg1.y)/(arg2.x - arg1.x)
-            self.yintercept = (arg1.x*(arg1.y - arg2.y))/(arg2.x - arg1.x) + arg1.y
+
+            delta_x = arg2.x - arg1.x
+            delta_y = arg2.y - arg1.y
+            if delta_x == 0:
+                # Line will be Vertical, slope - undefined
+                self.slope = None
+                self.yintercept = None
+                self.isVertical = True
+                
+                # CONVERT TO NORMAL FORM
+                # A = y1-y2; B= x2-x1; C=x1*y2-x2*y1
+                self.A = arg1.y - arg2.y 
+                self.B = arg1.x - arg2.x # WILL BE 0
+                self.C = arg1.x*arg2.y - arg2.x*arg1.y
+            elif delta_y == 0:
+                # Line will be Horizontal, slope - 0
+                self.slope = 0
+                self.yintercept = arg1.y #since the first part of the operation is 0 anyways
+                self.isHorizontal = True
+            else:
+                self.slope = (delta_y)/(delta_x)
+                self.yintercept = (arg1.x*(arg1.y - arg2.y))/(arg2.x - arg1.x) + arg1.y
         elif isinstance(arg1, float) and isinstance(arg2, float):
+            if arg1 == 0:
+                self.isHorizontal = True
+            elif arg1 is None:
+                self.isVertical = True
             self.slope = arg1
             self.yintercept = arg2
         else: 
             print("LineEquation oject was not constructed")
 
+def convertToNormalForm(line: LineEquation):
+    # takes a line in the form y = slope*x + y_intercept and tarnsform it into normal form by:
+    # y - slope*x - y_intercept = 0, where a=1, b=-slope, c=-y_intercept
+    a = 1
+    b = -1*line.slope
+    c = -1*line.yintercept
+
+    return a,b,c 
+
 def intersectionPoint(line1: LineEquation, line2: LineEquation):
     # considering we have two line equations: y = m1*x + b1 and y = m2*x + b2
     # X_intersection = (b2 -b1)/(m1-m2) and Y_intersection = (m1*xintersection) + b2
-    # extdStartSeg - Line 1 ; perpSeg - Line 2    
-    x = (line2.yintercept - line1.yintercept)/(line1.slope - line2.slope)
-    y = line1.slope*x + line1.yintercept
+    # extdStartSeg - Line 1 ; perpSeg - Line 2
 
-    return (x,y)
+    if line1.slope == line2.slope:
+        print("Lines are parallel, there is no intersection point")
+        return None
+    elif line2.isVertical:
+        # We compute the intersection point using the noral form now
+        # Convert also line2 to normal form:
+        line1_a, line1_b, line1_c = convertToNormalForm(line1)
+
+        # x = (-l2_c)/l2_a; y = (l1_a*l2_c - l1_c*l2_a)/ l2_a * l1_B
+        x = ((-1)*line2.c)/line2.a
+        y = (line1_a*line2.c - line1_c*line2.a)/(line2.a * line1_b)
+        return (x,y)
+    elif line1.isVertical:
+        line2_a, line2_b, line2_c = convertToNormalForm(line2)
+
+        # x = (-l1_c)/l1_a; y = (l2_a*l1_c - l2_c*l1_a)/ l1_a * l2_B
+        x = ((-1)*line2.c)/line2.a
+        y = (line2_a*line1.c - line2_c*line1.a)/(line1.a * line2_b)
+        return (x,y)
+    else:
+        x = (line2.yintercept - line1.yintercept)/(line1.slope - line2.slope)
+        y = line1.slope*x + line1.yintercept
+
+        return (x,y)
 
 def perpendicularIntersectionPointToLine(pt: shpPoint, lineEq: LineEquation):
+    if lineEq.isHorizontal:
+        # this means that our slope is 0, so we can't compute the slope will be UNDEFINED
+        # Solution: since the line is horizontal, pt.x stays the same, and y is replaced by line's y-intercept
+        return (pt.x, lineEq.yintercept)
+    if lineEq.isVertical:
+        print("FIXME: Intersection with vertical line is not implemented")
+        return None
+
     perpLine_slope = (-1)/lineEq.slope
     perpLine_yintercept = pt.y - perpLine_slope*pt.x
 
@@ -152,21 +219,11 @@ def convertSegListToSimplGeomLS(segList: list, ptsList: list, edgeSimplif: Edge)
 
         simplifiedLS: shpLS = shpLS(newPtsList)
 
-        plotShpLS(simplifiedLS, "green")
+        #plotShpLS(simplifiedLS, "green")
 
         newGeom = convertPtListToSimplGeomLS(newPtsList)
-        newEdge = Edge(
-            edgeSimplif.id,
-            edgeSimplif.start_node_id,
-            angle(newGeom[0],newGeom[1]),
-            edgeSimplif.end_node_id,
-            angle(newGeom[-1], newGeom[-2]),
-            edgeSimplif.left_face_id,
-            edgeSimplif.right_face_id,
-            newGeom,
-            {} #no info for now
-        )
-        return newEdge
+
+        return newGeom, eps_for_edge_geometry(newGeom)
 
 def plotShpLS(line: shpLS, color: str):
     x,y = line.xy
@@ -204,10 +261,14 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
 
     print(f"Original Edge: {edgeToBeSimplified.geometry}")
 
-    geom: shpLS = gpdGeom[edgeToBeSimplified.id]
+    #geom: shpLS = gpdGeom[edgeToBeSimplified.id]
+    try:
+        geom = wkt.loads(edgeToBeSimplified.geometry.wkt)
+    except shpErr.WKTReadingError as err:
+        print(f"Error while transforming the geom.wkt to shp LineString: {err}")
 
     #plot the initial geometry
-    plotShpLS(geom, "red")
+    #plotShpLS(geom, "red")
 
     ptsList = list(geom.coords)
 
@@ -253,14 +314,16 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
     if isCircular and segmentListLength < 6:
         print("In the case of a circular edge, at least 6 segments are required to perform the simplification!")
         # Otherwise topo errors?
-        return
+        return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
     
     if segmentListLength < 4:
         print("This polyline can't be simplified as it contains less than 4 segments")
-        return
+        return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
+        
     if segmentListLength == 4:
         # We have a special case here, where our ployline is short
-        pass
+        print("SHORT LINE SIMPLIFICATION NOT YET IMPLEMENTED; TODO: IMPLEMENT")
+        return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry) #TEMPORARY SOLUTION
     if segmentListLength > 4:
         # Construct the operation list
 
@@ -281,13 +344,13 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
                     if isCircular:
                         operToApplyToSegList[0] = Operations.SEG_EXTEND_START
                     else:
-                        operToApplyToSegList[smlstSegId] = Operations.REMOVE
+                        operToApplyToSegList[smlstSegId] = Operations.REMOVE_POINTS_QUADTREE # we still want to remove these points from the Quadtree
                         operToApplyToSegList[smlstSegId+1] = Operations.PT_EXTEND_END
         except IndexError as idxErr:
             # In this case, our shortest segment is the last one in the polyline. If the line is circular
             # then we can consider the first segment in our list to be removed (Idx 0), and the second one to be extended (Idx 1)
             if isCircular:
-                operToApplyToSegList[0] = Operations.REMOVE
+                operToApplyToSegList[0] = Operations.REMOVE_POINTS_QUADTREE
                 operToApplyToSegList[1] = Operations.SEG_EXTEND_START
             else:
                 # Our segment is the last in the polyline
@@ -299,7 +362,7 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
 
         if smlstSegId-1 >= 0:
             # neighbour to the left should be removed
-            operToApplyToSegList[smlstSegId-1] = Operations.REMOVE
+            operToApplyToSegList[smlstSegId-1] = Operations.REMOVE_POINTS_QUADTREE
 
             if smlstSegId-2 >= 0:
                 # second degree neighbour to the left should be modified (its start point should change)
@@ -312,12 +375,12 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
                     if isCircular:
                         operToApplyToSegList[segmentListLength-1] = Operations.SEG_EXTEND_END
                     else:
-                        operToApplyToSegList[smlstSegId] = Operations.REMOVE
+                        operToApplyToSegList[smlstSegId] = Operations.REMOVE_POINTS_QUADTREE
                         operToApplyToSegList[smlstSegId-1] = Operations.PT_EXTEND_START
         else:
             # This is the case where our shortest segment is the first one in the list (Idx_0)
             if isCircular:
-                operToApplyToSegList[segmentListLength-1] = Operations.REMOVE
+                operToApplyToSegList[segmentListLength-1] = Operations.REMOVE_POINTS_QUADTREE
                 operToApplyToSegList[segmentListLength-2] = Operations.SEG_EXTEND_END
             else:
                 # Our segment is the first in the polyline, so extend its starting point
@@ -395,6 +458,7 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
         replSegP2: shpPoint = shpPtList[replSeg.endId]
 
         if simplifyMedian:
+            #TODO: add QuadTree removal when working out Simplify Median
             # MEDIAN SIMPLIFICATION
             # we've already checked that in this list there is only one element (id), so we want to extract those
 
@@ -420,6 +484,9 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
             # Intersect extdStartSeg & perpSeg to determine the intersection point
             newPoint_extdStartSeg = intersectionPoint(extdStartSegLineEq, perpSegLineEq)
             newPoint_extdEndSeg = intersectionPoint(perpSegLineEq, extdEndSegLineEq)
+            if newPoint_extdStartSeg is None or newPoint_extdEndSeg is None:
+                #TODO: fix this if you ever start 
+                print("FIX THISSS  - IN MEDIAN SIMPLIFICATION")
 
             newSegList = []
 
@@ -462,7 +529,13 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
             # we change the segment which was supposed to have its ending extended with Pt_ext_end
             extdSegLineEq: LineEquation = LineEquation(extdStartSegP1, extdStartSegP2)
 
+            if extdSegLineEq.slope == 0:
+                plotShpLS(geom, "red")
+                
             intersPt = perpendicularIntersectionPointToLine(extdEndSegP2,extdSegLineEq)
+            if intersPt is None:
+                print("SIMPLIFICATION COULDN'T BE PERFORMED, RETURNING INITIAL GEOMETRY")
+                return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
 
             newSegListPtStartOper = []
 
@@ -470,15 +543,22 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
             ptsList.append(intersPt)
             intersPtIdx = len(ptsList) - 1 #last one added to the list
 
+            # Add to quadtree
+            pp.quadtree.add(intersPt)
 
             for operIdx in range(0,len(operToApplyToSegList)):
                 oper = operToApplyToSegList[operIdx]
+
+                oldSeg: Segment = segList[operIdx]
                 if oper is Operations.KEEP or oper is Operations.SEG_EXTEND_END:
                     newSegListPtStartOper.append(segList[operIdx])
                     continue
 
                 if oper is Operations.SEG_EXTEND_START:
-                    oldSeg: Segment = segList[operIdx]
+                    # Remove from quadtree
+                    oldSeg_Start = ptsList[oldSeg.startId]
+                    pp.quadtree.remove(oldSeg_Start)
+
                     newSeg = Segment(intersPtIdx, oldSeg.endId)
                     newSegListPtStartOper.append(newSeg)
                     continue
@@ -487,6 +567,13 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
                     newSeg = Segment(extendSegEnd.endId, intersPtIdx)
                     newSegListPtStartOper.append(newSeg)
                     continue
+
+                if oper is Operations.REPLACE:
+                    Pt_Start = ptsList[oldSeg.startId]
+                    Pt_End = ptsList[oldSeg.endId]
+                    pp.quadtree.remove(Pt_Start)
+                    pp.quadtree.remove(Pt_End)
+
 
             return convertSegListToSimplGeomLS(newSegListPtStartOper, ptsList, edgeToBeSimplified)
 
@@ -512,6 +599,9 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
         extdSegLineEq: LineEquation = LineEquation(extdStartSegP1, extdStartSegP2)
 
         intersPt = perpendicularIntersectionPointToLine(extdStartPointP1,extdSegLineEq)
+        if intersPt is None:
+            print("SIMPLIFICATION COULDN'T BE PERFORMED, RETURNING INITIAL GEOMETRY")
+            return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
 
         #
         newSegListPtStartOper = []
@@ -519,6 +609,7 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
         ptsList.append(intersPt)
         intersPt_extdStartIdx = len(ptsList) - 1 #last one added to the list
 
+        pp.quadtree.add(intersPt)
 
         for operIdx in range(0,len(operToApplyToSegList)):
             oper = operToApplyToSegList[operIdx]
@@ -529,11 +620,18 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
                 oldSeg: Segment = segList[operIdx]
                 newSeg = Segment(intersPt_extdStartIdx, oldSeg.endId)
                 newSegListPtStartOper.append(newSeg)
+                pp.quadtree.remove(ptsList[oldSeg.startId])
 
             if oper is Operations.PT_EXTEND_START:
                 oldSeg: Segment = segList[operIdx]
                 newSeg = Segment(oldSeg.startId, intersPt_extdStartIdx)
                 newSegListPtStartOper.append(newSeg)
+                pp.quadtree.remove(ptsList[oldSeg.endId])
+
+            if oper is Operations.REMOVE_POINTS_QUADTREE:
+                oldSeg: Segment = segList[operIdx]
+                pp.quadtree.remove(ptsList[oldSeg.startId])
+                pp.quadtree.remove(ptsList[oldSeg.endId])
 
         return convertSegListToSimplGeomLS(newSegListPtStartOper, ptsList, edgeToBeSimplified)
 
@@ -559,6 +657,9 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
         extdSegLineEq: LineEquation = LineEquation(extdEndSegP1, extdEndSegP2)
 
         intersPt = perpendicularIntersectionPointToLine(extdEndPointP2,extdSegLineEq)
+        if intersPt is None:
+            print("SIMPLIFICATION COULDN'T BE PERFORMED, RETURNING INITIAL GEOMETRY")
+            return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
 
         #
         newSegListPtStartOper = []
@@ -566,6 +667,7 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
         ptsList.append(intersPt)
         intersPt_extdStartIdx = len(ptsList) - 1 #last one added to the list
 
+        pp.quadtree.add(intersPt)
 
         for operIdx in range(0,len(operToApplyToSegList)):
             oper = operToApplyToSegList[operIdx]
@@ -576,10 +678,17 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
                 oldSeg: Segment = segList[operIdx]
                 newSeg = Segment(oldSeg.startId, intersPt_extdStartIdx)
                 newSegListPtStartOper.append(newSeg)
+                pp.quadtree.remove(ptsList[oldSeg.endId])
 
             if oper is Operations.PT_EXTEND_END:
                 oldSeg: Segment = segList[operIdx]
                 newSeg = Segment(intersPt_extdStartIdx, oldSeg.endId)
                 newSegListPtStartOper.append(newSeg)
+                pp.quadtree.remove(ptsList[oldSeg.startId])
+
+            if oper is Operations.REMOVE_POINTS_QUADTREE:
+                oldSeg: Segment = segList[operIdx]
+                pp.quadtree.remove(ptsList[oldSeg.startId])
+                pp.quadtree.remove(ptsList[oldSeg.endId])
 
         return convertSegListToSimplGeomLS(newSegListPtStartOper, ptsList, edgeToBeSimplified)

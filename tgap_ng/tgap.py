@@ -90,7 +90,7 @@ from contextlib import closing
 # FIXME: make possible to use both, dependent on line?
 # from .edge_simplify.visvalingham_whyatt import simplify
 #from .edge_simplify.reumann_witkam import simplify_reumann_witkam as simplify
-from .edge_simplify.samsonov_yakimova import simplifySY as simplify
+from .edge_simplify.samsonov_yakimova2 import simplifySY as simplify
 
 import sys
 
@@ -137,7 +137,8 @@ do_show_progress = False  # rename to do_show_trace?
 do_use_grassfire = False
 
 # whether to check the edge geometries (polylines) for (self-) intersection during the process
-do_expensive_post_condition_check_simplify = True
+do_expensive_post_condition_check_simplify = False
+do_expensive_check_after_each_simplification = True
 
 # some stats on what type of vertices are created while splitting areas
 STATS_SPLIT_VERTEX_TYPES = {0: 0, 1: 0, 2: 0, 3: 0}
@@ -252,32 +253,6 @@ def main():
     #print(f'Test Alex: {pp}')
     print(f"{time.time()-t0:.3f}s retrieved data from DBMS")
 
-    shpGeomDict: dict = {} #key - id, value - GeoSeries object
-
-    #convert geometry to GeoSeries
-    # for edgeId in pp.edges:
-    #     try:
-    #         wktGeom = pp.edges[edgeId].geometry.wkt
-    #         newGeom: GeoSeries = shp.from_wkt([wktGeom])
-            
-    #         pdGeom[edgeId] = newGeom
-    #         print(pp.edges[edgeId].geometry)
-    #     except shpErr.WKTReadingError as e:
-    #         print(e)
-
-    #convert geometry to shapely LineString
-    for edgeId in pp.edges:
-        try:
-            shpGeom = wkt.loads(pp.edges[edgeId].geometry.wkt)
-            #print(shpGeom)
-
-            shpGeomDict[edgeId] = shpGeom
-
-        except shpErr.WKTReadingError as err:
-            print(f"Error while transforming the geom.wkt to shp LineString: {err}")
-
-    #print(shpGeomDict)
-    
     stepToScale = scalestep.ScaleStep(BASE_DENOMINATOR, DATASET)
     current_denominator = stepToScale.scale_for_step(0)
     print(f"Scale denominator: 1:{current_denominator}")
@@ -362,6 +337,7 @@ def main():
             # remove_edge / remove_node here ??
             # add_edge / add_node subsequently ??
             old_edge = pp.edges[edge_id]
+
             needs_debug = edge_id in problematic_edge_ids
             if needs_debug:
                 output_pp_wkt(pp, "step")
@@ -370,7 +346,7 @@ def main():
             #     old_edge.geometry, pp, tolerance=small_eps, DEBUG=needs_debug
             # )
             simplified_geom, eps = simplify(
-                old_edge, pp, small_eps, gpdGeom=shpGeomDict
+                old_edge, pp, small_eps
             )
             new_edge = Edge(
                 old_edge.id,
@@ -392,6 +368,17 @@ def main():
             #                star = pp.nodes[node_id].star
             #                angles = [get_correct_angle(_, pp.edges) for _ in star]
             #                assert len(set(angles)) == len(angles)
+
+            # if do_expensive_check_after_each_simplification:
+            #     """In this situation, we will check the topology after each line is simplified
+            #     If it fails, the line is reverted back to its old version
+                
+            #     NOTE: THIS OPERATION IS VERY EXPENSIVE, FIND ALTERNATIVE TO IT"""
+            #     try:
+            #         check_topology_edge_geometry(pp, list(pp.edges.keys()))
+            #     except:
+            #         pp.edges[edge_id] = old_edge
+
 
             edge_seq[edge_id] = eps  # _for_edge_geometry(simplified_geom)
             if needs_debug:
@@ -597,10 +584,15 @@ def main():
                     input(f"simplify {edge_id} -- {op} - starting")
                 ##
 
-                simplified_geom, eps = simplify(
-                    old_edge.geometry, pp, tolerance=cur_resolution, DEBUG=needs_debug
-                )
+                # OLD VERSION: USED FOR VISVALLINGAM_WHYATT
+                # simplified_geom, eps = simplify(
+                #     old_edge.geometry, pp, tolerance=cur_resolution, DEBUG=needs_debug
+                # )
                 # = simplified_geom
+                # FOR SY Simplification:
+                simplified_geom, eps = simplify(
+                    old_edge, pp, cur_resolution, DEBUG=needs_debug
+                )
                 new_edge = Edge(
                     old_edge.id,
                     old_edge.start_node_id,

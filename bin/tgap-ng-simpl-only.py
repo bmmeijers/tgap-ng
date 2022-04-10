@@ -2,7 +2,8 @@
 
 from tgap_ng.tgap import main
 from tgap_ng.datastructure import retrieve
-from tgap_ng.edge_simplify.samsonov_yakimova2 import simplifySY
+#from tgap_ng.edge_simplify.samsonov_yakimova2 import simplifySY
+from tgap_ng.edge_simplify.SYSimplified import simplifySYSimple as simplifySY
 
 from shapely import wkt, errors as shpErr
 
@@ -57,27 +58,19 @@ if __name__ == '__main__':
         shpGeomDict[5303] = wkt.loads(simpl6.geometry.wkt)
 
     if simplify8801:
-        simpl1 = simplifySY(edge8801, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[8801] = wkt.loads(simpl1.geometry.wkt)
+        simpl1 = simplifySY(edge8801, pp, 0)
 
-        simpl2 = simplifySY(simpl1, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[8801] = wkt.loads(simpl2.geometry.wkt)
+        simpl2 = simplifySY(simpl1, pp, 0)
 
-        simpl3 = simplifySY(simpl2, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[8801] = wkt.loads(simpl3.geometry.wkt)
+        simpl3 = simplifySY(simpl2, pp, 0)
 
-        simpl4 = simplifySY(simpl3, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[8801] = wkt.loads(simpl4.geometry.wkt)
+        simpl4 = simplifySY(simpl3, pp, 0)
 
     if simplify9333:
-        simpl1 = simplifySY(edge9333, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[9333] = wkt.loads(simpl1.geometry.wkt)
+        simpl1 = simplifySY(edge9333, pp, 0)
 
-        simpl2 = simplifySY(simpl1, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[9333] = wkt.loads(simpl2.geometry.wkt)
+        simpl2 = simplifySY(simpl1, pp, 0)
 
-        simpl3 = simplifySY(simpl2, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[9333] = wkt.loads(simpl3.geometry.wkt)
+        simpl3 = simplifySY(simpl2, pp, 0)
 
-        simpl4 = simplifySY(simpl3, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[9333] = wkt.loads(simpl4.geometry.wkt)
+        simpl4 = simplifySY(simpl3, pp, 0)

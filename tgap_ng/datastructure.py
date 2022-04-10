@@ -346,7 +346,9 @@ def retrieve(DATASET, SRID, unbounded_id):
         ],
         64,
     )
+    print("TEST TO SEE HOW THE POINTS LOOK LIKE")
     for pt in pts.keys():
+        print(pt)
         tree.add(pt)
     pp.quadtree = tree
     print(f"{time.time()-t0:.3f}s quadtree construction")
