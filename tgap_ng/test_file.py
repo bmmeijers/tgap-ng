@@ -1,12 +1,14 @@
 from operator import index
 from geopandas import GeoSeries, geoseries
 
-from .datastructure import retrieve
+#from .datastructure import retrieve
 
 from shapely import errors as shErr
 from shapely.geometry import LineString
 
 import matplotlib.pyplot as plt
+
+from quadtree import QuadTree
 
 DATASET, unbounded_id = "top10nl_limburg_tiny", 0
 SRID = 28992
@@ -59,7 +61,7 @@ def testGeopandasStrucutre():
 #Test to see how Shapely LineString / geopandas work
     geoSrs: GeoSeries = GeoSeries()
 
-    pp = retrieve(DATASET, SRID, unbounded_id)
+    pp = None #TODO FIX THIS#retrieve(DATASET, SRID, unbounded_id)
     test_wkt_str = ["LineString (190946.701 308956.517, 190938.974 308937.474,"+
                     "190924.951 308909.693, 190902.461 308874.504, 190881.823 308847.516,"+
                     "190867.007 308830.583, 190837.109 308806.77, 190806.412 308783.159)"]
@@ -90,13 +92,32 @@ def testGeopandasStrucutre():
         except shErr.WKTReadingError as e:
             print(e)
 
+def testQuadTree():
+    qt = QuadTree(
+        [
+            (-100, -100),
+            (100, 100),
+        ],
+        64,
+    )
+
+    pt1 = (6,6)
+    qt.add(pt1)
+
+    minXY = (3,3)
+
+    maxXY = (9,9)
+    
+    qt.range_search((minXY, maxXY))
+    print(qt)
 
 def main():
     """
     I use this script to test out how different libraries such as Shapely and GeoPandas work. 
     """
     #testGeopandasStrucutre()
-    testGeoSeriesIntersection()
+    #testGeoSeriesIntersection()
+    testQuadTree()
 
     print("Ended execution of selected test functions")
 

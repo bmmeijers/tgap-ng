@@ -90,7 +90,8 @@ from contextlib import closing
 # FIXME: make possible to use both, dependent on line?
 # from .edge_simplify.visvalingham_whyatt import simplify
 #from .edge_simplify.reumann_witkam import simplify_reumann_witkam as simplify
-from .edge_simplify.samsonov_yakimova2 import simplifySY as simplify
+#from .edge_simplify.samsonov_yakimova2 import simplifySY as simplify
+from .edge_simplify.SYSimplified import simplifySYSimple as simplify
 
 import sys
 
@@ -321,6 +322,7 @@ def main():
 
         # problematic_face_ids = set([5930, 4930])# top10nl_9x9
         # problematic_face_ids = set([4531949])#drenthe
+        problematic_edges = [21516, 21519, 8729, 8750]
 
         #    small_eps = 3.
         for _ in range(len(edge_seq)):
@@ -332,7 +334,8 @@ def main():
                 break
         print(" simplifying {} edges".format(len(edge_ids_for_simplify)))
         for edge_id in edge_ids_for_simplify:
-
+            if edge_id == 21516:
+                print("Why doesn't this work??? DO we get to 21516")
             # FIXME: should we use
             # remove_edge / remove_node here ??
             # add_edge / add_node subsequently ??
@@ -345,9 +348,17 @@ def main():
             # simplified_geom, eps = simplify(
             #     old_edge.geometry, pp, tolerance=small_eps, DEBUG=needs_debug
             # )
-            simplified_geom, eps = simplify(
-                old_edge, pp, small_eps
+            print(f"Simplifying edge with id {edge_id}")
+            if edge_id in problematic_edges:
+                print("Break Here")
+                simplified_geom, eps = simplify(
+                old_edge, pp, small_eps, showPlots= True
             )
+            else:                
+                simplified_geom, eps = simplify(
+                        old_edge, pp, small_eps
+                    )
+            #print(f"Returned: geom={simplified_geom}, eps = {eps}")
             new_edge = Edge(
                 old_edge.id,
                 old_edge.start_node_id,
@@ -369,15 +380,16 @@ def main():
             #                angles = [get_correct_angle(_, pp.edges) for _ in star]
             #                assert len(set(angles)) == len(angles)
 
-            # if do_expensive_check_after_each_simplification:
-            #     """In this situation, we will check the topology after each line is simplified
-            #     If it fails, the line is reverted back to its old version
+            if edge_id in problematic_edges:
+                """In this situation, we will check the topology after each line is simplified
+                If it fails, the line is reverted back to its old version
                 
-            #     NOTE: THIS OPERATION IS VERY EXPENSIVE, FIND ALTERNATIVE TO IT"""
-            #     try:
-            #         check_topology_edge_geometry(pp, list(pp.edges.keys()))
-            #     except:
-            #         pp.edges[edge_id] = old_edge
+                NOTE: THIS OPERATION IS VERY EXPENSIVE, FIND ALTERNATIVE TO IT"""
+                print("ONE OF THE PROBLEMATIC EDGES WAS ENCOUNTERED")
+                # try:
+                #     check_topology_edge_geometry(pp, list(pp.edges.keys()))
+                # except:
+                #     pp.edges[edge_id] = old_edge
 
 
             edge_seq[edge_id] = eps  # _for_edge_geometry(simplified_geom)

@@ -1,15 +1,22 @@
+from __future__ import annotations
+
 from math import sqrt
-from .SY_DataStrucuctures import LineEquation, Segment
+
+from .SY_constants import Direction
 
 from shapely.geometry import Point as shpPoint, LineString as shpLS
 
-from tgap_ng.datastructure import Edge, angle
+from tgap_ng.datastructure import Edge
 
 import matplotlib.pyplot as plt
 
-from simplegeom import geometry as simplgeom
+import random
 
-from __future__ import annotations
+from quadtree import QuadTree
+
+def decideBias() -> Direction:
+    # Randomly decide between Left and Right directional bias
+    return random.choice(list(Direction))
 
 def createPoint(x,y) -> shpPoint:
     return shpPoint(x,y)
@@ -17,22 +24,6 @@ def createPoint(x,y) -> shpPoint:
 def computeLength(pt1, pt2):
     return sqrt(pow(pt2[0]-pt1[0],2) + pow(pt2[1]-pt1[1],2))
 
-def intersectionPoint(line1: LineEquation, line2: LineEquation):
-    # considering we have two line equations: y = m1*x + b1 and y = m2*x + b2
-    # X_intersection = (b2 -b1)/(m1-m2) and Y_intersection = (m1*xintersection) + b2
-    # extdStartSeg - Line 1 ; perpSeg - Line 2    
-    x = (line2.yintercept - line1.yintercept)/(line1.slope - line2.slope)
-    y = line1.slope*x + line1.yintercept
-
-    return (x,y)
-
-def perpendicularIntersectionPointToLine(pt: shpPoint, lineEq: LineEquation):
-    perpLine_slope = (-1)/lineEq.slope
-    perpLine_yintercept = pt.y - perpLine_slope*pt.x
-
-    perpLine = LineEquation(perpLine_slope, perpLine_yintercept)
-
-    return intersectionPoint(perpLine, lineEq)
 
 def convertSimplPtsToShp(ptList) -> list[shpPoint]:
         #get a list of coordinates like (x y) and convert them to Shapely Point
@@ -42,49 +33,56 @@ def convertSimplPtsToShp(ptList) -> list[shpPoint]:
 
         return shpPtList
 
-def printSmallestSegment(self):
-    print(f"Smallest segment has id {self.smlstSegId}, len: {self.smlstSegLen}")
-
-def convertPtListToSimplGeomLS(ptList: list):
-    # Convert our segments to LineString of type SimpleGeometry
-    orderedPtList = []
-    for pt in ptList:
-        simplePt = simplgeom.Point(pt[0], pt[1], 28992)
-        orderedPtList.append(simplePt)
-
-    return simplgeom.LineString(orderedPtList)
-
-def convertSegListToSimplGeomLS(segList: list, ptsList: list, edgeSimplif: Edge):
-    # Generate a new LineString from newSegmentList
-        newPtsList = []
-        for segIdx in range(0,len(segList)):
-            seg: Segment = segList[segIdx]
-            if segIdx == len(segList)-1: 
-                #if we have the last element, add both the end point and the first points
-                newPtsList.append(ptsList[seg.startId])
-                newPtsList.append(ptsList[seg.endId])
-            else:
-                newPtsList.append(ptsList[seg.startId])
-
-        simplifiedLS: shpLS = shpLS(newPtsList)
-
-        plotShpLS(simplifiedLS, "green")
-
-        newGeom = convertPtListToSimplGeomLS(newPtsList)
-        newEdge = Edge(
-            edgeSimplif.id,
-            edgeSimplif.start_node_id,
-            angle(newGeom[0],newGeom[1]),
-            edgeSimplif.end_node_id,
-            angle(newGeom[-1], newGeom[-2]),
-            edgeSimplif.left_face_id,
-            edgeSimplif.right_face_id,
-            newGeom,
-            {} #no info for now
-        )
-        return newEdge
-
 def plotShpLS(line: shpLS, color: str):
     x,y = line.xy
     plt.plot(x,y,c=color,marker='o')
     plt.show()
+
+def safelyAppendToDict(dictInstace: dict[list], anyKey, anyObject):
+    # append to list if key exists, or create list then append to it
+    if anyKey in dictInstace:
+        dictInstace[anyKey].append(anyObject)
+    else:
+        dictInstace[anyKey] = [anyObject]
+
+def safelyAddShpPtToQuadTree(qt: QuadTree, shpPt: shpPoint) -> bool:
+    # checks if point already exists in QuadTree. If it does, return False,
+    # otherwise add it and return True
+    pt = (shpPt.x, shpPt.y)
+    if qt.__contains__(pt):
+        print("Point already exists in QuadTree")
+        return False
+    qt.add(pt)
+    return True
+
+def safelyRemoveShpPtFromQuadTree(qt: QuadTree, shpPt: shpPoint) -> bool:
+    # if QT contains point, then reomove it (and return True for successful operation). Else, return False
+    pt = (shpPt.x, shpPt.y)
+    if qt.__contains__(pt):
+        qt.remove(pt)
+        return True
+    return False
+
+def quadTreeRangeSearchAdapter(ptsList: list[shpPoint], qt: QuadTree):
+    # Works as an adapter over the original range_search in QuadTree
+    # Get a list of points and compute minX, minY, maxX, maxY from them
+    # then change them in a format that is accepted by the quad tree
+    minX = 100000000
+    minY = 100000000
+    maxX = -100000000
+    maxY = -100000000
+
+    for pt in ptsList:
+        if pt.x < minX:
+            minX = pt.x
+        elif pt.x > maxX:
+            maxX = pt.x
+        elif pt.y < minY:
+            minY = pt.y
+        elif pt.y > maxY:
+            maxY = pt.y
+
+    maxXY = (maxX, maxY)
+    minXY = (minX, minY)
+
+    return qt.range_search((minXY, maxXY))

@@ -34,28 +34,28 @@ if __name__ == '__main__':
     edge8801 = pp.edges[8801] #open, simplify first segment
     edge9333 = pp.edges[9333]
 
-    simplify5303 = False
+    simplify5303 = True
     simplify8801 = False
-    simplify9333 = True
+    simplify9333 = False
 
     if simplify5303:
-        simpl1 = simplifySY(edge5303, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[5303] = wkt.loads(simpl1.geometry.wkt) #change the geometry in shpGeomDict
+        simpl1, eps1 = simplifySY(edge5303, pp, 0)
+        #shpGeomDict[5303] = wkt.loads(simpl1.geometry.wkt) #change the geometry in shpGeomDict
 
-        simpl2 = simplifySY(simpl1, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[5303] = wkt.loads(simpl2.geometry.wkt) 
+        simpl2 = simplifySY(simpl1, pp, 0)
+        #shpGeomDict[5303] = wkt.loads(simpl2.geometry.wkt) 
 
-        simpl3 = simplifySY(simpl2, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[5303] = wkt.loads(simpl3.geometry.wkt)
+        simpl3 = simplifySY(simpl2, pp, 0)
+        #shpGeomDict[5303] = wkt.loads(simpl3.geometry.wkt)
 
-        simpl4 = simplifySY(simpl3, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[5303] = wkt.loads(simpl4.geometry.wkt)
+        simpl4 = simplifySY(simpl3, pp, 0)
+        #shpGeomDict[5303] = wkt.loads(simpl4.geometry.wkt)
 
-        simpl5 = simplifySY(simpl4, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[5303] = wkt.loads(simpl5.geometry.wkt)
+        simpl5 = simplifySY(simpl4, pp, 0)
+        #shpGeomDict[5303] = wkt.loads(simpl5.geometry.wkt)
 
-        simpl6 = simplifySY(simpl5, pp, 0, gpdGeom= shpGeomDict)
-        shpGeomDict[5303] = wkt.loads(simpl6.geometry.wkt)
+        simpl6 = simplifySY(simpl5, pp, 0)
+        #shpGeomDict[5303] = wkt.loads(simpl6.geometry.wkt)
 
     if simplify8801:
         simpl1 = simplifySY(edge8801, pp, 0)
