@@ -96,6 +96,7 @@ class SegmentCollention():
         self.shortestSegmentId = -1 # first point will be replaces anyways
         self.pp = planarPartition
         self.origEdge = originalEdge
+        self.simplifiedSegList = []
 
         if pointList[0] == pointList[-1]:
             #we have a closed edge (start Node = end Node)
@@ -225,8 +226,14 @@ class SegmentCollention():
 
         return segListAdvanced
 
-    def simplify(self, initialShpPtList: list[shpPoint], initialSimplePtList: list):
+    def simplify(self, initialShpPtList: list[shpPoint], initialSimplePtList: list) -> shpLS:
         simplTRX = QuadTreeTransactionalManager()
+
+        # Considering a Segment Collection object with a well-initialized advanced-segment list
+        # (meaning that the attachAdvancedOperations hasN'T returned an exception), this function will take that list
+        # and save to self the simplified segment list
+
+        # TODO IMPORTANT: until the simplificaition works fully with SY exclusively, don't change the point transaction, not important now
 
         # Besides recording the points which are deleted and added in the QuadTree in the transactional manager, 
         # we should also record them to check if there are any point contained withing the rectangle created by there recorded points
@@ -312,9 +319,7 @@ class SegmentCollention():
         #   -> Remove the point opposite of the anchorPt from QT
         # KeepWithAnchorPt: (occurs only when substituting Median simpl to Shortcut)
         #   -> add it to the new segment list, and before or after it (depending on the position of the relevant Point)
-        #       add a new segment containing the IntersectionPt and AnchorPt
-
-        simplifiedSegList = []
+        #       add a new segment containing the IntersectionPt and AnchorPt        
 
         if isDiagonalSimpl:
             # In this situation, we have a short polyline (4 segments), and we have to simplify an interior segment (id 1 or 2)
@@ -324,7 +329,7 @@ class SegmentCollention():
 
             newSeg = Segment(firstSeg.endId, lastSeg.startId)
 
-            newSegList = [firstSeg, newSeg, lastSeg]
+            self.simplifiedSegList = [firstSeg, newSeg, lastSeg]
 
             # From Quad Tree, we can remove either the endPt of seg[1] or StartPt of Seg[2] - same point!
             removedPtId = self.segListSimple[1].endId
@@ -336,26 +341,15 @@ class SegmentCollention():
             simplTRX.addTransaction(Transaction.UseOnlyForCheck, initialShpPtList[firstSeg.endId])
             simplTRX.addTransaction(Transaction.UseOnlyForCheck, initialShpPtList[firstSeg.startId])
 
-            # COPIED FROM BELOW, NOT SURE HOW TO SKIP OVER ALL THE OTHER OPERATIONS:
-            pointsInModifiedArea = quadTreeRangeSearchAdapter(simplTRX.returnShpPts(),self.pp.quadtree)
 
-            for discoveredPt in pointsInModifiedArea:
-                #it might find points which we have added to QT, ignore those
-                if discoveredPt in simplTRX.returnSimplPts():
-                    pointsInModifiedArea.remove(discoveredPt)
-            if len(pointsInModifiedArea) > 0:
-                # TOPOLOGY ERRORS!!!!
-                simplTRX.rollback(self.pp.quadtree)
-                raise TopologyIssuesException
-
-            return convertSegListToSimplGeomLS(newSegList, initialSimplePtList, self.origEdge)
+            return converSegListToShpLS(self.simplifiedSegList, initialSimplePtList)
 
         for iterAdvSegId in range(0,len(self.segListAdv)):
             currentAdvSeg: AdvancedSegment = self.segListAdv[iterAdvSegId]
             advSegOper = currentAdvSeg.operation
             if advSegOper is Operations.Keep:
                 # Simply append to list
-                simplifiedSegList.append(self.segListSimple[iterAdvSegId])
+                self.simplifiedSegList.append(self.segListSimple[iterAdvSegId])
             elif advSegOper is Operations.Ignore:
                 # DO NOTHING HERE
                 pass
@@ -375,14 +369,14 @@ class SegmentCollention():
                     # Start will be modified to take the new intersection Point
                     newSeg = Segment(intersPtId, oldSeg.endId)
                     startPt = initialShpPtList[oldSeg.startId]
-                    simplifiedSegList.append(newSeg)
+                    self.simplifiedSegList.append(newSeg)
 
                     simplTRX.addTransaction(Transaction.Remove, startPt)
                     safelyRemoveShpPtFromQuadTree(self.pp.quadtree, startPt)
                 else:
                     newSeg = Segment(oldSeg.startId, intersPtId)
                     endPt = initialShpPtList[oldSeg.endId]
-                    simplifiedSegList.append(newSeg)
+                    self.simplifiedSegList.append(newSeg)
 
                     simplTRX.addTransaction(Transaction.Remove, endPt)
                     safelyRemoveShpPtFromQuadTree(self.pp.quadtree, endPt)
@@ -393,7 +387,7 @@ class SegmentCollention():
                 if currentAdvSeg.location is PositionRelevantPt.Start:
                     newSeg = Segment(oldSeg.startId, intersPtId)
                     endPt = initialShpPtList[oldSeg.endId]
-                    simplifiedSegList.append(newSeg)
+                    self.simplifiedSegList.append(newSeg)
 
                     simplTRX.addTransaction(Transaction.Remove, endPt)
                     safelyRemoveShpPtFromQuadTree(self.pp.quadtree, endPt)
@@ -401,7 +395,7 @@ class SegmentCollention():
                     # In this case, our anchor point is End
                     newSeg = Segment(intersPtId, oldSeg.endId)
                     startPt = initialShpPtList[oldSeg.startId]
-                    simplifiedSegList.append(newSeg)
+                    self.simplifiedSegList.append(newSeg)
 
                     simplTRX.addTransaction(Transaction.Remove, startPt)
                     safelyRemoveShpPtFromQuadTree(self.pp.quadtree, startPt)
@@ -409,30 +403,23 @@ class SegmentCollention():
                 oldSeg = currentAdvSeg.seg
                 if currentAdvSeg.location is PositionRelevantPt.Start:
                     newSeg = Segment(intersPtId, oldSeg.startId)
-                    simplifiedSegList.append(newSeg)
-                    simplifiedSegList.append(oldSeg)
+                    self.simplifiedSegList.append(newSeg)
+                    self.simplifiedSegList.append(oldSeg)
                 else:
                     newSeg = Segment(oldSeg.endId, intersPtId)
-                    simplifiedSegList.append(oldSeg)
-                    simplifiedSegList.append(newSeg)
-
-        # TOPOLOGICAL CHECK
-        # Now that we have a list of simplified segments, we want to check if the shape formed by the points which have 
-        # been added to the transaction manager doesn't contain any points in quadtree
-        pointsInModifiedArea = quadTreeRangeSearchAdapter(simplTRX.returnShpPts(),self.pp.quadtree)
-
-        # for discoveredPt in pointsInModifiedArea:
-        #     #it might find points which we have added to QT, ignore those
-        #     if discoveredPt in simplTRX.returnSimplPts():
-        #         pointsInModifiedArea.remove(discoveredPt)
-        # if len(pointsInModifiedArea) > 0:
-        #     # TOPOLOGY ERRORS!!!!
-        #     simplTRX.rollback(self.pp.quadtree)
-        #     raise TopologyIssuesException
+                    self.simplifiedSegList.append(oldSeg)
+                    self.simplifiedSegList.append(newSeg)
+        
+        # NO TOPOLOGICAL CHECK PERFORMED AT THIS POINT. HERE WE JUST SIMPLIFY IT 
+        # AND RETURN THE LIST CONTAINING THE NEW SIMPLIFIED VERSION, THAT'S ALL
 
         # print("Simplification performed successfully")
-        # return convertSegListToSimplGeomLS(simplifiedSegList, initialSimplePtList, self.origEdge)
+        return converSegListToShpLS(self.simplifiedSegList, initialSimplePtList)
 
+    def returnFinalEdge(self, pointList) -> Edge:
+        # print(f"No points when converting to Simpl LS: {len(pointList)}\n"
+        #       f"SimplifiedSegList: {self.simplifiedSegList}")
+        return convertSegListToSimplGeomLS(self.simplifiedSegList,pointList)
 ##################################################################
 # OTHER GEOMETRY STUFF
 class LineEquation:
@@ -509,7 +496,7 @@ def convertPtListToSimplGeomLS(ptList: list):
         simplePt = simplgeom.Point(pt[0], pt[1], 28992)
         orderedPtList.append(simplePt)
 
-    return simplgeom.LineString(orderedPtList)
+    return simplgeom.LineString(orderedPtList, 28992)
 
 def convertToNormalForm(line: LineEquation):
     # takes a line in the form y = slope*x + y_intercept and tarnsform it into normal form by:
@@ -582,7 +569,7 @@ def perpendicularIntersectionPointToLine(pt: shpPoint, lineEq: LineEquation):
 
 #     return intersectionPoint(perpLine, lineEq)
 
-def convertSegListToSimplGeomLS(segList: list, ptsList: list, edgeSimplif: Edge):
+def convertSegListToSimplGeomLS(segList: list, ptsList: list):
     # Generate a new LineString from newSegmentList
         newPtsList = []
         for segIdx in range(0,len(segList)):
@@ -593,41 +580,41 @@ def convertSegListToSimplGeomLS(segList: list, ptsList: list, edgeSimplif: Edge)
                 newPtsList.append(ptsList[seg.endId])
             else:
                 newPtsList.append(ptsList[seg.startId])
-
-        simplifiedLS: shpLS = shpLS(newPtsList)
-
-        if edgeSimplif.id == 8750:
-            plotShpLS(simplifiedLS, "green")
 
         newGeom = convertPtListToSimplGeomLS(newPtsList)
-        newEdge = Edge(
-            edgeSimplif.id,
-            edgeSimplif.start_node_id,
-            angle(newGeom[0],newGeom[1]),
-            edgeSimplif.end_node_id,
-            angle(newGeom[-1], newGeom[-2]),
-            edgeSimplif.left_face_id,
-            edgeSimplif.right_face_id,
-            newGeom,
-            {} #no info for now
-        )
-        return newEdge
 
-def convertSegListToSimplGeomOnly(segList: list, ptsList: list):
-    # Generate a new LineString from newSegmentList
-        newPtsList = []
-        for segIdx in range(0,len(segList)):
-            seg: Segment = segList[segIdx]
-            if segIdx == len(segList)-1: 
-                #if we have the last element, add both the end point and the first points
-                newPtsList.append(ptsList[seg.startId])
-                newPtsList.append(ptsList[seg.endId])
-            else:
-                newPtsList.append(ptsList[seg.startId])
+        return newGeom
 
-        simplifiedLS: shpLS = shpLS(newPtsList)
+# def convertSegListToSimplGeomOnly(segList: list, ptsList: list):
+#     # Generate a new LineString from newSegmentList
 
-        #ShpLS(simplifiedLS, "green")
+#     # NOT USED ANYWHERE, BUT THERE's SOMETHING WRONG IN THE LOGIC OF THIS FUCTION
+#         newPtsList = []
+#         for segIdx in range(0,len(segList)):
+#             seg: Segment = segList[segIdx]
+#             if segIdx == len(segList)-1: 
+#                 #if we have the last element, add both the end point and the first points
+#                 newPtsList.append(ptsList[seg.startId])
+#                 newPtsList.append(ptsList[seg.endId])
+#             else:
+#                 newPtsList.append(ptsList[seg.startId])
 
-        return convertPtListToSimplGeomLS(newPtsList)
+#         simplifiedLS: shpLS = shpLS(newPtsList)
 
+#         #ShpLS(simplifiedLS, "green")
+
+#         return convertPtListToSimplGeomLS(newPtsList)
+
+def converSegListToShpLS(segList: list, ptsList: list) -> shpLS:
+    # Generate a Shapely LineString from a segment list
+    newPtsList = []
+    for segIdx in range(0,len(segList)):
+        seg: Segment = segList[segIdx]
+        if segIdx == len(segList)-1: 
+            #if we have the last element, add both the end point and the first points
+            newPtsList.append(ptsList[seg.startId])
+            newPtsList.append(ptsList[seg.endId])
+        else:
+            newPtsList.append(ptsList[seg.startId])
+
+    return shpLS(newPtsList)

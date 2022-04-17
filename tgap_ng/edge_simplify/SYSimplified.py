@@ -1,6 +1,7 @@
 from __future__ import annotations #used for type-hinting for lists (like list[Class])
 from enum import IntEnum
 import traceback
+from xxlimited import new
 from tgap_ng.datastructure import PlanarPartition, Edge, eps_for_edge_geometry
 
 from shapely import wkt, errors as shpErr
@@ -44,6 +45,7 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
     #print("Entered SY Simplification Module - v2.1 - Shortcut and Diagonal only")
     #print(f"Original Edge: {edgeToBeSimplified.geometry}")
 
+    print(f"Starting the SY Simplification for edge {edgeToBeSimplified.id}")
     try:
         geom = wkt.loads(edgeToBeSimplified.geometry.wkt)
     except shpErr.WKTReadingError as err:
@@ -54,7 +56,7 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
         plotShpLS(geom, "red")
 
     ptsList = list(geom.coords)
-
+    #print(f"Initial no of points {len(ptsList)}")
     # Create a point list containing the Shapely Points, and from that generate a segment List
     shpPtList = convertSimplPtsToShp(ptsList)
     
@@ -67,8 +69,7 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
 
     try:
-        newEdge = segColl.simplify(shpPtList, ptsList)
-        return newEdge.geometry, eps_for_edge_geometry(newEdge.geometry)
+        newgeom: shpLS = segColl.simplify(shpPtList, ptsList)
     except TopologyIssuesException:
         print("Returning original edge")
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
@@ -76,10 +77,42 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
         print("COULD NOT PERFORM A CORRECT CLASSIFICATION. Returning original edge")
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
     except Exception as e:
-        print (f"Random Exception: {e}, {traceback.format_exc()}")
+        print (f"Random Exception: {e}, {traceback.format_exc()}. Retruning original edge")
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
     
+    #plotShpLS(newgeom, "green")
 
-    print("Test print")
+    ##################################################
+    # Now that we have a simplified edge, we have to perform a topological check.
+    # Note: The solution proposed below doesn't seem to be the most efficient, but HOPEFULLY it will work
+    #
+    # We know that, since the planar partition adheres initially (i.e. b4 simplification) to topological consistencies rules,
+    # after the simplification, we can check the intersections between the new LS and all other geometries having either left or right face in common
+    # extract those geometries from PP, transform them into Shapely LS, and then perform the .intersects() opertaion
+
+    # First, check for self-interections. That is also a topological error, and should be handled accordingly
+    if not newgeom.is_simple:
+        print(f"Our simplified line from edge {edgeToBeSimplified.id} results in a SELF-INTERSECTION. Retruning original edge")
+        return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
+
+    # get the geometries from PP
+    neighbouringFaces = [edgeToBeSimplified.left_face_id, edgeToBeSimplified.right_face_id]
+    neighbouringEdges = [e for e in list(pp.edges.values()) 
+        if (e.left_face_id in neighbouringFaces or e.right_face_id in neighbouringFaces) and e.id != edgeToBeSimplified.id]
+
+    for edge in neighbouringEdges:
+        shpEdge = wkt.loads(edge.geometry.wkt)
+        if newgeom.intersects(shpEdge):
+            print(f"Our simplified geometry seems to interect neighbouring edge with id {edge.id}. Retruning original edge")
+            #plotShpLS(newgeom, "red")
+            #plotShpLS(shpEdge, "green")
+            return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
+
+    print(f"SIMPLIFICATION PERFORMED SUCCESSFULLY! Edge with id {edgeToBeSimplified.id} has been successfully simplified, and no topological issues have been detected")
+
+    finalEdge = segColl.returnFinalEdge(ptsList)
+
+    return finalEdge, eps_for_edge_geometry(finalEdge)
+
     
     

@@ -50,7 +50,7 @@ def safelyAddShpPtToQuadTree(qt: QuadTree, shpPt: shpPoint) -> bool:
     # otherwise add it and return True
     pt = (shpPt.x, shpPt.y)
     if qt.__contains__(pt):
-        print("Point already exists in QuadTree")
+        #print("Point already exists in QuadTree")
         return False
     qt.add(pt)
     return True
