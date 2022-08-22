@@ -1,8 +1,5 @@
 from __future__ import annotations #used for type-hinting for lists (like list[Class])
-from enum import IntEnum
-import traceback
-from xxlimited import new
-from tgap_ng.datastructure import PlanarPartition, Edge, eps_for_edge_geometry
+from tgap_ng.datastructure import PlanarPartition, Edge, eps_for_edge_geometry, parent
 
 from shapely import wkt, errors as shpErr
 from shapely.geometry import Point as shpPoint, LineString as shpLS
@@ -10,11 +7,13 @@ from simplegeom import geometry as simplgeom
 
 import matplotlib.pyplot as plt
 
-from .SY_utils import plotShpLS, convertSimplPtsToShp
+from .SY_utils import plotShpLS, convertSimplPtsToShp, decideBias
 from .SY_DataStrucuctures import SegmentCollention, ObjectNotCreatedException
 from .SY_constants import TopologyIssuesException, PreClassificationException
 
 from math import sqrt, pow
+
+from .utils import checkIntersectionSimplifiedSegWithNeighbouringSegments
 
 def returnIndexesOfSearchedElems(listToBeSearched: list, queryKeywords: list) -> dict:
     # Returns the indexes which contain one of the keywords in the queries list
@@ -45,6 +44,14 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
     #print("Entered SY Simplification Module - v2.1 - Shortcut and Diagonal only")
     #print(f"Original Edge: {edgeToBeSimplified.geometry}")
 
+    startNodeGeom = pp.nodes[edgeToBeSimplified.start_node_id].geometry
+    endNodeGeom = pp.nodes[edgeToBeSimplified.end_node_id].geometry
+
+    startPoint = (startNodeGeom.x, startNodeGeom.y)
+    endPoint = (endNodeGeom.x, endNodeGeom.y)
+
+    mainNodesList = [startPoint, endPoint]
+
     print(f"Starting the SY Simplification for edge {edgeToBeSimplified.id}")
     try:
         geom = wkt.loads(edgeToBeSimplified.geometry.wkt)
@@ -64,20 +71,22 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
     try:
         segColl = SegmentCollention(shpPtList, pp, edgeToBeSimplified)
     except ObjectNotCreatedException:        
-        print("The Segment Collection could not be created")
+        #print("The Segment Collection could not be created")
         # TODO: WHAT SHOULD I DO ONE IT FAILS?
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
 
     try:
-        newgeom: shpLS = segColl.simplify(shpPtList, ptsList)
+         
+        bias = decideBias()
+        newgeom: shpLS = segColl.simplify(shpPtList, ptsList, bias)
     except TopologyIssuesException:
-        print("Returning original edge")
+        # print("SYERROR - Returning original edge")
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
     except PreClassificationException:
-        print("COULD NOT PERFORM A CORRECT CLASSIFICATION. Returning original edge")
+        #print("SYERROR - COULD NOT PERFORM A CORRECT CLASSIFICATION. Returning original edge")
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
     except Exception as e:
-        print (f"Random Exception: {e}, {traceback.format_exc()}. Retruning original edge")
+        #print (f"Random Exception: {e}, {traceback.format_exc()}. Retruning original edge")
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
     
     #plotShpLS(newgeom, "green")
@@ -92,24 +101,15 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
 
     # First, check for self-interections. That is also a topological error, and should be handled accordingly
     if not newgeom.is_simple:
-        print(f"Our simplified line from edge {edgeToBeSimplified.id} results in a SELF-INTERSECTION. Retruning original edge")
+        #print(f"Our simplified line from edge {edgeToBeSimplified.id} results in a SELF-INTERSECTION. Retruning original edge")
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
 
-    # get the geometries from PP
-    neighbouringFaces = [edgeToBeSimplified.left_face_id, edgeToBeSimplified.right_face_id]
-    neighbouringEdges = [e for e in list(pp.edges.values()) 
-        if (e.left_face_id in neighbouringFaces or e.right_face_id in neighbouringFaces) and e.id != edgeToBeSimplified.id]
+    if checkIntersectionSimplifiedSegWithNeighbouringSegments(edgeToBeSimplified, newgeom, pp, mainNodesList) is False:
+        return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
+    
+    #print(f"SIMPLIFICATION PERFORMED SUCCESSFULLY! Edge with id {edgeToBeSimplified.id} has been successfully simplified, and no topological issues have been detected")
 
-    for edge in neighbouringEdges:
-        shpEdge = wkt.loads(edge.geometry.wkt)
-        if newgeom.intersects(shpEdge):
-            print(f"Our simplified geometry seems to interect neighbouring edge with id {edge.id}. Retruning original edge")
-            #plotShpLS(newgeom, "red")
-            #plotShpLS(shpEdge, "green")
-            return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
-
-    print(f"SIMPLIFICATION PERFORMED SUCCESSFULLY! Edge with id {edgeToBeSimplified.id} has been successfully simplified, and no topological issues have been detected")
-
+    segColl.trxManager.commit(pp.quadtree)
     finalEdge = segColl.returnFinalEdge(ptsList)
 
     return finalEdge, eps_for_edge_geometry(finalEdge)

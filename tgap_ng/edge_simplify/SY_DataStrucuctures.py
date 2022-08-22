@@ -6,7 +6,7 @@ from .SY_constants import (
     TopologyIssuesException, VerticalIntersectionNotImplemented
 )
 from .SY_utils import (
-    safelyAppendToDict, decideBias, plotShpLS, safelyAddShpPtToQuadTree, 
+    safelyAppendToDict, plotShpLS, safelyAddShpPtToQuadTree, 
     safelyRemoveShpPtFromQuadTree, quadTreeRangeSearchAdapter
 )
 from shapely.geometry import Point as shpPoint, LineString as shpLS
@@ -31,6 +31,12 @@ class QuadTreeTransactionalManager:
             elif t[0] is Transaction.Add:
                 safelyRemoveShpPtFromQuadTree(qt, t[1])
 
+    def commit(self, qt: QuadTree):
+        for t in self.trx:
+            if t[0] is Transaction.Remove:
+                safelyRemoveShpPtFromQuadTree(qt, t[1])
+            elif t[0] is Transaction.Add:
+                safelyAddShpPtToQuadTree(qt, t[1])
     def returnShpPts(self) -> list[shpPoint]:
         ptsList = []
         for t in self.trx:
@@ -97,6 +103,7 @@ class SegmentCollention():
         self.pp = planarPartition
         self.origEdge = originalEdge
         self.simplifiedSegList = []
+        self.trxManager = QuadTreeTransactionalManager()
 
         if pointList[0] == pointList[-1]:
             #we have a closed edge (start Node = end Node)
@@ -226,18 +233,10 @@ class SegmentCollention():
 
         return segListAdvanced
 
-    def simplify(self, initialShpPtList: list[shpPoint], initialSimplePtList: list) -> shpLS:
-        simplTRX = QuadTreeTransactionalManager()
-
+    def simplify(self, initialShpPtList: list[shpPoint], initialSimplePtList: list, bias) -> shpLS:
         # Considering a Segment Collection object with a well-initialized advanced-segment list
         # (meaning that the attachAdvancedOperations hasN'T returned an exception), this function will take that list
         # and save to self the simplified segment list
-
-        # TODO IMPORTANT: until the simplificaition works fully with SY exclusively, don't change the point transaction, not important now
-
-        # Besides recording the points which are deleted and added in the QuadTree in the transactional manager, 
-        # we should also record them to check if there are any point contained withing the rectangle created by there recorded points
-        ptsToVerifyTopology = [] 
 
         # Since we're only applying Shortcut and Diagonal simplifications, we require a Point and a Line, so that we can 
         # determine the perpendicular from the point on the line equation. This is common for all operations, and this can be easily
@@ -260,8 +259,7 @@ class SegmentCollention():
             isDiagonalSimpl = True
         elif len(segOperDict.get(Operations.Extend,[])) == 2 and Operations.KeepRefPtOnly not in segOperDict:
             # This is the case where we would have applied Median simplification, but we will replace that with the simple
-            # point to line operation. 
-            bias = decideBias()
+            # point to line operation.
             extendIdsList = segOperDict[Operations.Extend]
 
             # Search the ids with extend start and end
@@ -296,9 +294,8 @@ class SegmentCollention():
             intersPtId = len(initialShpPtList) -1
 
             # Add intersection Point to QuadTree and transaction
-            simplTRX.addTransaction(Transaction.Add, intersPtShp)
+            self.trxManager.addTransaction(Transaction.Add, intersPtShp)
 
-            safelyAddShpPtToQuadTree(self.pp.quadtree,intersPtShp)
 
         ##################################
         # From this point, we begin to do the actual simplification. All (important) operations which can be performed on a segment 
@@ -335,12 +332,7 @@ class SegmentCollention():
             removedPtId = self.segListSimple[1].endId
             removedPt = initialShpPtList[removedPtId]
 
-            simplTRX.addTransaction(Transaction.Remove, removedPt)
-            safelyRemoveShpPtFromQuadTree(self.pp.quadtree, removedPt)
-
-            simplTRX.addTransaction(Transaction.UseOnlyForCheck, initialShpPtList[firstSeg.endId])
-            simplTRX.addTransaction(Transaction.UseOnlyForCheck, initialShpPtList[firstSeg.startId])
-
+            self.trxManager.addTransaction(Transaction.Remove, removedPt)
 
             return converSegListToShpLS(self.simplifiedSegList, initialSimplePtList)
 
@@ -358,11 +350,8 @@ class SegmentCollention():
                 endPt = initialShpPtList[advSeg.seg.endId]
 
                 # save to rollback later
-                simplTRX.addTransaction(Transaction.Remove, startPt)
-                simplTRX.addTransaction(Transaction.Remove, endPt)
-
-                safelyRemoveShpPtFromQuadTree(self.pp.quadtree, startPt)
-                safelyRemoveShpPtFromQuadTree(self.pp.quadtree, endPt)
+                self.trxManager.addTransaction(Transaction.Remove, startPt)
+                self.trxManager.addTransaction(Transaction.Remove, endPt)
             elif advSegOper is Operations.Extend:
                 oldSeg = currentAdvSeg.seg
                 if currentAdvSeg.location is PositionRelevantPt.Start:
@@ -371,15 +360,13 @@ class SegmentCollention():
                     startPt = initialShpPtList[oldSeg.startId]
                     self.simplifiedSegList.append(newSeg)
 
-                    simplTRX.addTransaction(Transaction.Remove, startPt)
-                    safelyRemoveShpPtFromQuadTree(self.pp.quadtree, startPt)
+                    self.trxManager.addTransaction(Transaction.Remove, startPt)
                 else:
                     newSeg = Segment(oldSeg.startId, intersPtId)
                     endPt = initialShpPtList[oldSeg.endId]
                     self.simplifiedSegList.append(newSeg)
 
-                    simplTRX.addTransaction(Transaction.Remove, endPt)
-                    safelyRemoveShpPtFromQuadTree(self.pp.quadtree, endPt)
+                    self.trxManager.addTransaction(Transaction.Remove, endPt)
 
 
             elif advSegOper is Operations.KeepRefPtOnly:
@@ -389,16 +376,14 @@ class SegmentCollention():
                     endPt = initialShpPtList[oldSeg.endId]
                     self.simplifiedSegList.append(newSeg)
 
-                    simplTRX.addTransaction(Transaction.Remove, endPt)
-                    safelyRemoveShpPtFromQuadTree(self.pp.quadtree, endPt)
+                    self.trxManager.addTransaction(Transaction.Remove, endPt)
                 else:
                     # In this case, our anchor point is End
                     newSeg = Segment(intersPtId, oldSeg.endId)
                     startPt = initialShpPtList[oldSeg.startId]
                     self.simplifiedSegList.append(newSeg)
 
-                    simplTRX.addTransaction(Transaction.Remove, startPt)
-                    safelyRemoveShpPtFromQuadTree(self.pp.quadtree, startPt)
+                    self.trxManager.addTransaction(Transaction.Remove, startPt)
             elif advSegOper is Operations.KeepWithAnchorPt:
                 oldSeg = currentAdvSeg.seg
                 if currentAdvSeg.location is PositionRelevantPt.Start:

@@ -27,7 +27,7 @@ def testGeoSeriesIntersection():
     # l1 x l3 (or l2 x l4, ...) -> one common point -> ?
     print(f"l1 x l2 -> {ls1.intersection(ls2)}")
     print(f"l3 x l4 -> {ls3.intersection(ls4)}")
-    print(f"l1 x l2 -> {ls1.intersection(ls3)}")
+    print(f"l1 x l3 (common starting point)-> {ls1.intersection(ls3)}")
 
     #NOTE: Findings (good to remember!) .intersection returns the point(s) where the two linestrings intersect.
 
@@ -116,8 +116,8 @@ def main():
     I use this script to test out how different libraries such as Shapely and GeoPandas work. 
     """
     #testGeopandasStrucutre()
-    #testGeoSeriesIntersection()
-    testQuadTree()
+    testGeoSeriesIntersection()
+    #testQuadTree()
 
     print("Ended execution of selected test functions")
 
