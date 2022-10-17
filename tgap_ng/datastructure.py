@@ -232,6 +232,16 @@ def eps_for_edge_geometry(g):
                 eps = height
     return eps
 
+def eps_for_edge_geometry_length(g):
+    eps = sys.float_info.max
+    if len(g) > 2:
+        for i in range(0, len(g) - 1):
+            j = i + 1
+            base = dist(g[i], g[j])
+
+            if base < eps:
+                eps = base
+    return eps
 
 def retrieve(DATASET, SRID, unbounded_id):
     pp = PlanarPartition(unbounded_id)
@@ -335,7 +345,6 @@ def retrieve(DATASET, SRID, unbounded_id):
             faces[right_face_id].edges.add(~edge_id)
             edge_hierarchy[edge_id] = None
     print(f"{time.time()-t0:.3f}s edge retrieval: {len(edges)} edges")
-    print(f"Alex Test: {faces[1019]}")
     t0 = time.time()
     # DO_SIMPLIFY
 
@@ -817,7 +826,10 @@ def get_geometry_for_wheel(wheel, pp):
             # and add linestring to it
             ln.pop()
             ln.extend(g)
-    return simplegeom.geometry.LinearRing(ln)
+
+    print("Stop here to debug")
+    retrun_of_simplegeom = simplegeom.geometry.LinearRing(ln)
+    return retrun_of_simplegeom
 
 
 def get_geometry_indexed_for_wheel(wheel, pp):

@@ -16,6 +16,7 @@ from math import sqrt, pow
 from .utils import checkIntersectionSimplifiedSegWithNeighbouringSegments
 
 def returnIndexesOfSearchedElems(listToBeSearched: list, queryKeywords: list) -> dict:
+    # NOT USED???
     # Returns the indexes which contain one of the keywords in the queries list
     # in the form a dictionary key=enum -> value=list[idx]
     resultDict = {}
@@ -52,7 +53,7 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
 
     mainNodesList = [startPoint, endPoint]
 
-    print(f"Starting the SY Simplification for edge {edgeToBeSimplified.id}")
+    #print(f"Starting the SY Simplification for edge {edgeToBeSimplified.id}")
     try:
         geom = wkt.loads(edgeToBeSimplified.geometry.wkt)
     except shpErr.WKTReadingError as err:
@@ -76,7 +77,6 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
 
     try:
-         
         bias = decideBias()
         newgeom: shpLS = segColl.simplify(shpPtList, ptsList, bias)
     except TopologyIssuesException:
@@ -88,8 +88,10 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
     except Exception as e:
         #print (f"Random Exception: {e}, {traceback.format_exc()}. Retruning original edge")
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
-    
-    #plotShpLS(newgeom, "green")
+
+    # plot the initial geometry
+    if showPlots:
+        plotShpLS(newgeom, "green")
 
     ##################################################
     # Now that we have a simplified edge, we have to perform a topological check.
@@ -115,4 +117,4 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
     return finalEdge, eps_for_edge_geometry(finalEdge)
 
     
-    
+
