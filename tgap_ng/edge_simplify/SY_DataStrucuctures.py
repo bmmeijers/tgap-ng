@@ -543,7 +543,10 @@ def perpendicularIntersectionPointToLine(pt: shpPoint, lineEq: LineEquation):
         # Solution: since the line is horizontal, pt.x stays the same, and y is replaced by line's y-intercept
         return (pt.x, lineEq.yintercept)
     if lineEq.isVertical:
-        return None
+        if lineEq.B != 0:
+            print("THIS SHOULD NEVER EVER EVER HAPPEN, WTF????")
+        x_location = (-1)*(lineEq.C/lineEq.A)
+        return (x_location, pt.y)
 
     perpLine_slope = (-1)/lineEq.slope
     perpLine_yintercept = pt.y - perpLine_slope*pt.x

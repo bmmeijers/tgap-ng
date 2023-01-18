@@ -18,6 +18,13 @@ def decideBias() -> Direction:
     # Randomly decide between Left and Right directional bias
     return random.choice(list(Direction))
 
+def reverseBias(origBias:Direction) -> Direction:
+    # Reverses the bias
+    if origBias is Direction.Left:
+        return Direction.Right
+
+    return Direction.Left
+
 def createPoint(x,y) -> shpPoint:
     return shpPoint(x,y)
 

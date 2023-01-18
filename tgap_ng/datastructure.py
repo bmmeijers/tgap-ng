@@ -827,7 +827,7 @@ def get_geometry_for_wheel(wheel, pp):
             ln.pop()
             ln.extend(g)
 
-    print("Stop here to debug")
+    #print("Stop here to debug")
     retrun_of_simplegeom = simplegeom.geometry.LinearRing(ln)
     return retrun_of_simplegeom
 
