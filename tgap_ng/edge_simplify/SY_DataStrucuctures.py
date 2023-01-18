@@ -3,7 +3,8 @@ from __future__ import annotations #used for type-hinting for lists (like list[C
 from .SY_constants import (
     Operations, PositionRelevantPt, Direction, 
     PreClassificationException, ObjectNotCreatedException, Transaction,
-    TopologyIssuesException, VerticalIntersectionNotImplemented
+    TopologyIssuesException, VerticalIntersectionNotImplemented,
+    IntersectionPointSameAsOtherPoint
 )
 from .SY_utils import (
     safelyAppendToDict, plotShpLS, safelyAddShpPtToQuadTree, 
@@ -156,7 +157,7 @@ class SegmentCollention():
 
         # Here we perform some checks to see if it is possible to attach operations
         if self.isCircular and lenSegList < 6:
-            print("In the case of a circular edge, at least 6 segments are required to perform the simplification!")
+            #print("In the case of a circular edge, at least 6 segments are required to perform the simplification!")
             # Otherwise topo errors?
             raise Exception
 
@@ -287,6 +288,10 @@ class SegmentCollention():
                 raise VerticalIntersectionNotImplemented
             intersPtShp: shpPoint = shpPoint(intersPt[0],intersPt[1])
 
+            if intersPt in initialSimplePtList:
+                #print("!!!!!!!!!!!Intersection point same as another point in the initial list, not OK!!!!!!!!!!!!")
+                raise IntersectionPointSameAsOtherPoint
+
             # append new Point to both lists
             initialShpPtList.append(intersPtShp)
             initialSimplePtList.append(intersPt)
@@ -405,6 +410,7 @@ class SegmentCollention():
         # print(f"No points when converting to Simpl LS: {len(pointList)}\n"
         #       f"SimplifiedSegList: {self.simplifiedSegList}")
         return convertSegListToSimplGeomLS(self.simplifiedSegList,pointList)
+
 ##################################################################
 # OTHER GEOMETRY STUFF
 class LineEquation:
@@ -537,7 +543,10 @@ def perpendicularIntersectionPointToLine(pt: shpPoint, lineEq: LineEquation):
         # Solution: since the line is horizontal, pt.x stays the same, and y is replaced by line's y-intercept
         return (pt.x, lineEq.yintercept)
     if lineEq.isVertical:
-        return None
+        if lineEq.B != 0:
+            print("THIS SHOULD NEVER EVER EVER HAPPEN, WTF????")
+        x_location = (-1)*(lineEq.C/lineEq.A)
+        return (x_location, pt.y)
 
     perpLine_slope = (-1)/lineEq.slope
     perpLine_yintercept = pt.y - perpLine_slope*pt.x
@@ -565,6 +574,14 @@ def convertSegListToSimplGeomLS(segList: list, ptsList: list):
                 newPtsList.append(ptsList[seg.endId])
             else:
                 newPtsList.append(ptsList[seg.startId])
+
+        noDuplicatesPtsList = []
+        [noDuplicatesPtsList.append(x) for x in newPtsList if x not in noDuplicatesPtsList]
+
+        #if len(newPtsList) > len(noDuplicatesPtsList):
+        #    newGeomNoDuplicates = convertPtListToSimplGeomLS(noDuplicatesPtsList)
+        #    print("!!!!!!!!!!!!!!!We have duplicates in out LIST!!!!!!!!!!!!!!!")
+        #    return newGeomNoDuplicates
 
         newGeom = convertPtListToSimplGeomLS(newPtsList)
 

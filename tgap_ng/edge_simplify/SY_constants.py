@@ -4,14 +4,17 @@ class ObjectNotCreatedException(Exception):
     pass
 
 class PreClassificationException(Exception):
-    print("Could not simplify due to the initial segment classifictation being faulty")
+    #print("Could not simplify due to the initial segment classifictation being faulty")
     pass
 
 class TopologyIssuesException(Exception):
-    print("Simplification has resulted in Topological Issues")
+    #print("Simplification has resulted in Topological Issues")
     pass
     
 class VerticalIntersectionNotImplemented(Exception):
+    pass
+
+class IntersectionPointSameAsOtherPoint(Exception):
     pass
 
 class Operations(IntEnum):

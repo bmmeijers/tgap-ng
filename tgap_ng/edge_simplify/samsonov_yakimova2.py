@@ -312,7 +312,7 @@ def simplifySY(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG =
     segmentListLength = len(segList)
 
     if isCircular and segmentListLength < 6:
-        print("In the case of a circular edge, at least 6 segments are required to perform the simplification!")
+        #print("In the case of a circular edge, at least 6 segments are required to perform the simplification!")
         # Otherwise topo errors?
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
     

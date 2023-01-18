@@ -7,7 +7,7 @@ from simplegeom import geometry as simplgeom
 
 import matplotlib.pyplot as plt
 
-from .SY_utils import plotShpLS, convertSimplPtsToShp, decideBias
+from .SY_utils import plotShpLS, convertSimplPtsToShp, decideBias, reverseBias
 from .SY_DataStrucuctures import SegmentCollention, ObjectNotCreatedException
 from .SY_constants import TopologyIssuesException, PreClassificationException
 
@@ -16,6 +16,7 @@ from math import sqrt, pow
 from .utils import checkIntersectionSimplifiedSegWithNeighbouringSegments
 
 def returnIndexesOfSearchedElems(listToBeSearched: list, queryKeywords: list) -> dict:
+    # NOT USED???
     # Returns the indexes which contain one of the keywords in the queries list
     # in the form a dictionary key=enum -> value=list[idx]
     resultDict = {}
@@ -30,7 +31,7 @@ def returnIndexesOfSearchedElems(listToBeSearched: list, queryKeywords: list) ->
 
     return resultDict
 
-def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG = False, showPlots = False):
+def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, DEBUG = False, showPlots = False, count_success = [0,0,0,0,0]):
     """
     Method used for simplifying a polyline having characteristics of man-made structures
     (i.e. orthogonal turns inbetween segments)
@@ -52,7 +53,7 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
 
     mainNodesList = [startPoint, endPoint]
 
-    print(f"Starting the SY Simplification for edge {edgeToBeSimplified.id}")
+    #print(f"Starting the SY Simplification for edge {edgeToBeSimplified.id}")
     try:
         geom = wkt.loads(edgeToBeSimplified.geometry.wkt)
     except shpErr.WKTReadingError as err:
@@ -73,23 +74,32 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
     except ObjectNotCreatedException:        
         #print("The Segment Collection could not be created")
         # TODO: WHAT SHOULD I DO ONE IT FAILS?
+        count_success[1] += 1
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
 
     try:
-         
         bias = decideBias()
         newgeom: shpLS = segColl.simplify(shpPtList, ptsList, bias)
-    except TopologyIssuesException:
+    #except TopologyIssuesException:\
+        #NOT EVEN USED!!!!
         # print("SYERROR - Returning original edge")
-        return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
+        #segColl.trxManager.rollback(pp.quadtree)
+        #count_success[1] += 1
+        #return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
     except PreClassificationException:
         #print("SYERROR - COULD NOT PERFORM A CORRECT CLASSIFICATION. Returning original edge")
+        #segColl.trxManager.rollback(pp.quadtree)
+        count_success[2] += 1
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
     except Exception as e:
         #print (f"Random Exception: {e}, {traceback.format_exc()}. Retruning original edge")
+        #segColl.trxManager.rollback(pp.quadtree)
+        count_success[2] += 1
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
-    
-    #plotShpLS(newgeom, "green")
+
+    # plot the initial geometry
+    if showPlots:
+        plotShpLS(newgeom, "green")
 
     ##################################################
     # Now that we have a simplified edge, we have to perform a topological check.
@@ -102,9 +112,22 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
     # First, check for self-interections. That is also a topological error, and should be handled accordingly
     if not newgeom.is_simple:
         #print(f"Our simplified line from edge {edgeToBeSimplified.id} results in a SELF-INTERSECTION. Retruning original edge")
+        #segColl.trxManager.rollback(pp.quadtree)
+        # RESERVE BIAS CODE, BUT DOES NOT GIVE BETTER RESULT!!!
+        #segColl2 = SegmentCollention(shpPtList, pp, edgeToBeSimplified)
+        #try:
+        #    newgeom2: shpLS = segColl2.simplify(shpPtList, ptsList, reverseBias(bias))
+        #except:
+        count_success[3] += 1
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
+        #if not newgeom2.is_simple:
+        #    count_success[3] += 1
+        #    return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
+        #newgeom = newgeom2
 
     if checkIntersectionSimplifiedSegWithNeighbouringSegments(edgeToBeSimplified, newgeom, pp, mainNodesList) is False:
+        #segColl.trxManager.rollback(pp.quadtree)
+        count_success[4] += 1
         return edgeToBeSimplified.geometry, eps_for_edge_geometry(edgeToBeSimplified.geometry)
     
     #print(f"SIMPLIFICATION PERFORMED SUCCESSFULLY! Edge with id {edgeToBeSimplified.id} has been successfully simplified, and no topological issues have been detected")
@@ -112,7 +135,9 @@ def simplifySYSimple(edgeToBeSimplified: Edge, pp: PlanarPartition, tolerance, D
     segColl.trxManager.commit(pp.quadtree)
     finalEdge = segColl.returnFinalEdge(ptsList)
 
+    count_success[0] += 1
+
     return finalEdge, eps_for_edge_geometry(finalEdge)
 
     
-    
+

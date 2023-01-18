@@ -27,7 +27,7 @@ from shapely.geometry import LineString as shpLS
 logging.basicConfig(level=logging.FATAL)
 import pprint
 
-from enum import IntEnum
+from enum import IntEnum, Enum
 
 from connection import connection
 import simplegeom.geometry
@@ -47,6 +47,7 @@ from . import scalestep
 from .datastructure import (
     retrieve,
     dissolve_unwanted_nodes,
+    #eps_for_edge_geometry_length as eps_for_edge_geometry,
     eps_for_edge_geometry,
     Node,
     Edge,
@@ -117,11 +118,19 @@ from collections import OrderedDict
 # SRID = 28992
 # BASE_DENOMINATOR = 10000
 
-# DATASET, unbounded_id = "top10nl_drenthe", 0
-# SRID = 28992
-# BASE_DENOMINATOR = 10000
+#DATASET, unbounded_id = "top10nl_drenthe", 0
+#SRID = 28992
+#BASE_DENOMINATOR = 10000
 
-DATASET, unbounded_id = "top10nl_limburg_tiny", 0
+#DATASET, unbounded_id = "top10nl_9x9", 0
+#SRID = 28992
+#BASE_DENOMINATOR = 10000
+
+#DATASET, unbounded_id = "top10nl_limburg_tiny", 0
+#SRID = 28992
+#BASE_DENOMINATOR = 10000
+
+DATASET, unbounded_id = "top10nl_limburg_subset2", 0
 SRID = 28992
 BASE_DENOMINATOR = 10000
 
@@ -136,7 +145,7 @@ BASE_DENOMINATOR = 10000
 OUTPUT_DATASET_NM = DATASET
 
 # whether to perform line simplification on the edge geometries
-do_edge_simplification = True
+do_edge_simplification = False
 
 # whether to show detailed progress information
 # -- shows detailed progress on which face / edge is dealt with
@@ -160,13 +169,11 @@ class SimplificationAlgorithms(IntEnum):
     SHP = 3
     SY_RW = 4
 
-
-
 print(("Processing {}".format(DATASET)))
 
 # Dictionary with key as the simplification variant and as value - which classes does that simplificaiton apply to
 simplification_per_class = {
-    SimplificationAlgorithms.SY: [13], #gebouw
+    SimplificationAlgorithms.SY: [13], #, 14], #gebouw
     SimplificationAlgorithms.SHP : [10, 11, 12] #wegdeel, spoorbaandeel, waterdeel
 }
 
@@ -193,13 +200,14 @@ def check_vertices(pp):
         input("missing vertices in quadtree")
     ### END vertex check ###
 
+
 #NOTE: I will comment out all the return DB-related operations using #DB, so that I can test without messing with the DB (at first)
 def main():
     import time
 
     start_process_t0 = time.time()
 
-    used_simplification = SimplificationAlgorithms.SY
+    used_simplification = SimplificationAlgorithms.SY_RW
     output = output_layers(OUTPUT_DATASET_NM, SRID)
     #    output = []
     # initialize tables
@@ -217,6 +225,9 @@ def main():
     current_denominator = stepToScale.scale_for_step(0)
     print(f"Scale denominator: 1:{current_denominator}")
 
+    no_success_SY = [0,0,0,0,0] #SUCCESS,FAIL_Object_creation, FAIL_Simplify, FAIL_not_simple, FAIL_intersect_neighbour !!!
+
+    list_failed_on_creation_SY = []
     # are all vertices in the quadtree ??
     # vertex_check(pp)
 
@@ -258,8 +269,15 @@ def main():
 
     #    check_vertices(pp)
     problematic_edge_ids = set([])  # 60329, 61045, 61121]) #16552]) #353, 453]) #[48815])
-    problematic_face_ids = set([])  # 4760, 4621, 6136, 7450, 4756, 7360])
-    
+    problematic_face_ids = set([]) # General
+    #problematic_face_ids = set([5661]) #Subset-2
+    #problematic_face_ids = set([5661, 5593,14302,14589])  #Subset-3
+    #problematic_face_ids = set([7618, 5661, 17535]) # Original 9x9 Dataset
+
+    #some (very dumb) statistics
+    RW_simplifications_number = 0
+    SY_simplifications_number = 0
+
     if do_edge_simplification:
         # FIXME: de-duplicate code of edge geometry simplification after other
         # generalization operations (split/merge)
@@ -310,6 +328,10 @@ def main():
 
             # SWITCHING BETWEEN SIMPLIFICATION VERSIONS MODULE!
             # THIS OCCURS IN TWO PLACES, MAKE SURE TO CHANGE IT THERE AS WELL
+            # START IMPLEMENTATION
+
+            #if edge_id == 4512542:
+            #    print(f"Here {edge_id} assertion is failing, why?")
 
             if used_simplification is SimplificationAlgorithms.RW:
                 simplified_geom, eps = simplifyRW(
@@ -317,7 +339,7 @@ def main():
                     DEBUG=needs_debug)
             elif used_simplification is SimplificationAlgorithms.SY:
                 simplified_geom, eps = simplifySY(
-                        old_edge, pp, small_eps
+                        old_edge, pp, small_eps, count_success=no_success_SY
                     )
             elif used_simplification is SimplificationAlgorithms.SHP:
                 simplified_geom = shapelyIntersection(old_edge, pp)
@@ -340,7 +362,7 @@ def main():
                 if leftFaceClass in simplification_per_class[SimplificationAlgorithms.SY] or rightFaceClass in simplification_per_class[SimplificationAlgorithms.SY]:
                     #print("Gebouw detected, SY Simplificaiton initialized")
                     simplified_geom, eps = simplifySY(
-                        old_edge, pp, small_eps
+                        old_edge, pp, small_eps, count_success=no_success_SY
                     )
                 elif leftFaceClass in simplification_per_class[SimplificationAlgorithms.SHP] or rightFaceClass in simplification_per_class[SimplificationAlgorithms.SHP]:
                     #print("wegdeel, spoorbaandeel or waterdeel detected, Shapely Simplification initialized")
@@ -366,13 +388,37 @@ def main():
                     #Right face is world face!
                     rightFaceClass = -1
 
-                if leftFaceClass in simplification_per_class[SimplificationAlgorithms.SY] or rightFaceClass in simplification_per_class[SimplificationAlgorithms.SY]:
-                    #print("Gebouw detected, SY Simplificaiton initialized")
-                    simplified_geom, eps = simplifySY(old_edge, pp, small_eps)
-                else:
-                    #print("Another class was detected, RW Simplficaition intialized")
-                    simplified_geom, eps = simplifyRW(old_edge.geometry, pp, tolerance=step_denom, 
-                        DEBUG=needs_debug)
+                num_tries_creation_SY_current = no_success_SY[1]
+
+                skip = False
+
+                #if this edge is already in our failed list, we apply directly RW, and continue
+                if old_edge.id in list_failed_on_creation_SY:
+                    simplified_geom, eps = simplifyRW(old_edge.geometry, pp, tolerance=step_denom,
+                                                      DEBUG=needs_debug)
+                    RW_simplifications_number += 1
+                    skip = True
+
+                if not skip:
+                    if leftFaceClass in simplification_per_class[SimplificationAlgorithms.SY] or rightFaceClass in simplification_per_class[SimplificationAlgorithms.SY]:
+                        #print("Gebouw detected, SY Simplificaiton initialized")
+                        simplified_geom, eps = simplifySY(old_edge, pp, small_eps, count_success=no_success_SY)
+                        SY_simplifications_number += 1
+
+                        num_tries_creation_SY_updated = no_success_SY[1] #if the simplification failed bc of creation, this should be higher
+                        if num_tries_creation_SY_updated > num_tries_creation_SY_current:
+                            #next time, it will be simplified w/ RW, so we'll add it to the list
+                            list_failed_on_creation_SY.append(old_edge.id)
+                            simplified_geom, eps = simplifyRW(old_edge.geometry, pp, tolerance=step_denom,
+                                                              DEBUG=needs_debug)
+                            RW_simplifications_number += 1
+                            SY_simplifications_number -= 1
+
+                    else:
+                        #print("Another class was detected, RW Simplficaition intialized")
+                        simplified_geom, eps = simplifyRW(old_edge.geometry, pp, tolerance=step_denom,
+                            DEBUG=needs_debug)
+                        RW_simplifications_number += 1
             #print(f"Returned: geom={simplified_geom}, eps = {eps}")
             new_edge = Edge(
                 old_edge.id,
@@ -393,7 +439,8 @@ def main():
             if needs_debug:
                 output_pp_wkt(pp, "step")
                 input(f"face step - simplify - replaced edge")
-        #
+
+            #END IMPLEMENTATION
         delta = time.time() - t0
 
         # quadtree
@@ -485,6 +532,10 @@ def main():
             #########################################################
             # Split
             #            try:
+
+            if face_id == 5661:
+                 print("Stop here 5661")
+
             denom_for_step = stepToScale.scale_for_step(face_step)
             # determine line simplify threshold
             cur_resolution = stepToScale.resolution_mpp(denom_for_step)
@@ -592,26 +643,20 @@ def main():
                     output_pp_wkt(pp, "step")
                     input(f"simplify {edge_id} -- {op} - starting")
                 ##
-                if old_edge.id == 5303:
-                    print("Stop here")
-                # OLD VERSION: USED FOR VISVALLINGAM_WHYATT
-                # simplified_geom, eps = simplifyRW(
-                #     old_edge.geometry, pp, tolerance=cur_resolution, DEBUG=needs_debug
-                # )
-                # = simplified_geom
-                # FOR SY Simplification:
-                # simplified_geom, eps = simplify(
-                #     old_edge, pp, cur_resolution, DEBUG=needs_debug
-                # )
+                #if old_edge.id == 5303:
+                #    print("Stop here")
+
                 #SWITCHING BETWEEN SIMPLIFICATION VERSIONS MODULE!
                 #THIS OCCURS IN TWO PLACES, MAKE SURE TO CHANGE IT THERE AS WELL
+                # START IMPLEMENTATION
+
                 if used_simplification == SimplificationAlgorithms.RW:
                     simplified_geom, eps = simplifyRW(
                         old_edge.geometry, pp, tolerance=cur_resolution, 
                         DEBUG=needs_debug)
                 elif used_simplification == SimplificationAlgorithms.SY:
                     simplified_geom, eps = simplifySY(
-                            old_edge, pp, small_eps
+                            old_edge, pp, small_eps, count_success=no_success_SY
                         )
                 elif used_simplification == SimplificationAlgorithms.SHP:
                     simplified_geom = shapelyIntersection(old_edge, pp)
@@ -636,7 +681,7 @@ def main():
 
                     if leftFaceClass in simplification_per_class[SimplificationAlgorithms.SY] or rightFaceClass in simplification_per_class[SimplificationAlgorithms.SY]:
                         #print("Gebouw detected, SY Simplificaiton initialized")
-                        simplified_geom, eps = simplifySY(old_edge, pp, small_eps)
+                        simplified_geom, eps = simplifySY(old_edge, pp, small_eps, count_success=no_success_SY)
                     elif leftFaceClass in simplification_per_class[SimplificationAlgorithms.SHP] or rightFaceClass in simplification_per_class[SimplificationAlgorithms.SHP]:
                         #print("wegdeel, spoorbaandeel or waterdeel detected, Shapely Simplification initialized")
                         simplified_geom = shapelyIntersection(old_edge, pp)
@@ -647,26 +692,52 @@ def main():
                 elif used_simplification == SimplificationAlgorithms.SY_RW:
                     # IN this situation, we decide between the different version of the algorithm.
                     # We choose based on an importance ranking
-                    leftFaceId = parent(old_edge.left_face_id,pp.face_hierarchy)
-                    rightFaceId = parent(old_edge.right_face_id,pp.face_hierarchy)
+                    leftFaceId = parent(old_edge.left_face_id, pp.face_hierarchy)
+                    rightFaceId = parent(old_edge.right_face_id, pp.face_hierarchy)
                     try:
-                        leftFaceClass = math.trunc(pp.faces[leftFaceId].info['feature_class_id'] / 1000) # we only care about the first two numbers
+                        leftFaceClass = math.trunc(pp.faces[leftFaceId].info[
+                                                       'feature_class_id'] / 1000)  # we only care about the first two numbers
                     except Exception as e:
-                        #Left face is world face!
+                        # Left face is world face!
                         leftFaceClass = -1
-                    try:  
+                    try:
                         rightFaceClass = math.trunc(pp.faces[rightFaceId].info['feature_class_id'] / 1000)
                     except Exception as e:
-                        #Right face is world face!
+                        # Right face is world face!
                         rightFaceClass = -1
 
-                    if leftFaceClass in simplification_per_class[SimplificationAlgorithms.SY] or rightFaceClass in simplification_per_class[SimplificationAlgorithms.SY]:
-                        print("Gebouw detected, SY Simplificaiton initialized")
-                        simplified_geom, eps = simplifySY(old_edge, pp, small_eps)
-                    else:
-                        print("Another class was detected, RW Simplficaition intialized")
-                        simplified_geom, eps = simplifyRW(old_edge.geometry, pp, tolerance=cur_resolution, 
-                            DEBUG=needs_debug)
+                    num_tries_creation_SY_current = no_success_SY[1]
+
+                    skip = False
+
+                    # if this edge is already in our failed list, we apply directly RW, and continue
+                    if old_edge.id in list_failed_on_creation_SY:
+                        simplified_geom, eps = simplifyRW(old_edge.geometry, pp, tolerance=step_denom,
+                                                          DEBUG=needs_debug)
+                        RW_simplifications_number += 1
+                        skip = True
+
+                    if not skip:
+                        if leftFaceClass in simplification_per_class[SimplificationAlgorithms.SY] or rightFaceClass in \
+                                simplification_per_class[SimplificationAlgorithms.SY]:
+                            # print("Gebouw detected, SY Simplificaiton initialized")
+                            simplified_geom, eps = simplifySY(old_edge, pp, small_eps, count_success=no_success_SY)
+                            SY_simplifications_number += 1
+
+                            num_tries_creation_SY_updated = no_success_SY[1]  # if the simplification failed bc of creation, this should be higher
+                            if num_tries_creation_SY_updated > num_tries_creation_SY_current:
+                                # next time, it will be simplified w/ RW, so we'll add it to the list
+                                list_failed_on_creation_SY.append(old_edge.id)
+                                simplified_geom, eps = simplifyRW(old_edge.geometry, pp, tolerance=step_denom,
+                                                                  DEBUG=needs_debug)
+                                RW_simplifications_number += 1
+                                SY_simplifications_number -= 1
+                        else:
+                            # print("Another class was detected, RW Simplficaition intialized")
+                            simplified_geom, eps = simplifyRW(old_edge.geometry, pp, tolerance=step_denom,
+                                                              DEBUG=needs_debug)
+                            RW_simplifications_number += 1
+
                 new_edge = Edge(
                     old_edge.id,
                     old_edge.start_node_id,
@@ -695,15 +766,7 @@ def main():
                 # having a direct relation with the edges that were simplified
                 check_topology_edge_geometry(pp, edge_ids_for_simplify)
 
-        ##            if edge_id in some:
-        ##                print(edge_id, eps, len(simplified_geom))
-
-        #        if face_id == 4779:
-        #            output_pp_wkt(pp, "step")
-        #            input(f"face step - {op} - done")
-
-        #    if ct > 25:
-        #        break
+            #END IMPLEMENTATION
         delta = time.time() - t0
         if (processed % 10000) == 0:
             # print delta, "face merging"
@@ -719,8 +782,6 @@ def main():
                     table.clear()
                     del table
 
-    #        if rate < 100:
-    #            break
 
     # - finish everything that still remains
     face_step += 1
@@ -762,6 +823,13 @@ def main():
             normalize_seconds(duration_in_secs)
         )
     )
+
+    print(f"SY Simplifications = {SY_simplifications_number} ; RW Simplifications = {RW_simplifications_number}")
+    print(f"SY Success: {no_success_SY[0]}")
+    print(f"SY Failed by Object Creation: {no_success_SY[1]}")
+    print(f"SY Failed when Simplifying : {no_success_SY[2]}")
+    print(f"SY Failed by Self-Intersection: {no_success_SY[3]}")
+    print(f"SY Failed by Intersection With Other Objects: {no_success_SY[4]}")
 
 
 def check_topology_edge_geometry(pp, edge_ids):
@@ -1091,7 +1159,7 @@ def split_face(
         edge = pp.edges[edge_id]
         tmp = [(pt.x, pt.y) for pt in densified_geometry[edge_id]]  # edge.geometry]
         for pair in zip(tmp, tmp[1:]):
-            converter.add_segment(pair[0], pair[1])
+            converter.add_segment(pair[0], pair[1]) #ALEX: issue here!
 
     # from these nodes get all edges that have a relation to the face
     # e.g. also touch the face in only 1 node
