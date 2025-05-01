@@ -3,18 +3,22 @@
 ## START print replacement
 ## replacement for print function, to have also the file and linenumber printed where print is being invoked
 ## warning: if print is used for writing to a file object, this messes it up (kwargs not taken into account)
-# from inspect import getframeinfo, stack
-# import sys
-# def print(*args, **kwargs):
+#from inspect import getframeinfo, stack
+#import sys
+#def print(*args, **kwargs):
 #    message = " ".join(map(str, args))      # <-- stack()[1][0] for this line
 #    caller = getframeinfo(stack()[1][0])
 #    sys.stdout.write("%s:%d - %s\n" % (caller.filename.split("/")[-1], caller.lineno, message)) # python3 syntax print
 #    sys.stdout.flush()
-# import builtins
-# builtins.print = print
+#import builtins
+#builtins.print = print
 ## END print replacement
+from collections import deque
 import logging
 import sys
+import datetime
+
+from tgap_ng.edge_simplify import visvalingham_whyatt
 
 # logging is used inside connection + grassfire (split), we can set the level here
 logging.basicConfig(level=logging.FATAL)
@@ -38,6 +42,7 @@ from . import scalestep
 from .datastructure import (
     retrieve,
     dissolve_unwanted_nodes,
+    dissolve_unwanted_edges,
     eps_for_edge_geometry,
     Node,
     Edge,
@@ -83,8 +88,8 @@ from io import StringIO
 from contextlib import closing
 
 # FIXME: make possible to use both, dependent on line?
-# from .edge_simplify.visvalingham_whyatt import simplify
-from .edge_simplify.reumann_witkam import simplify_reumann_witkam as simplify
+from .edge_simplify.visvalingham_whyatt import simplify
+# from .edge_simplify.reumann_witkam import simplify_reumann_witkam as simplify
 
 import sys
 
@@ -95,20 +100,43 @@ import sys
 
 
 # DATASET, unbounded_id = "gima_goes", -1
+#DATASET, unbounded_id = "bgt_larger_limburg", -1
+#SRID = 28992
+#BASE_DENOMINATOR = 1000
 
 # DATASET, unbounded_id = "tp_toponl", 0
 # SRID = 28992
 # BASE_DENOMINATOR = 10000
 
-# DATASET, unbounded_id = "top10nl_drenthe", 0
+#DATASET, unbounded_id = "top10nl_drenthe", 0
+#SRID = 28992
+#BASE_DENOMINATOR = 10000
+
+# DATASET, unbounded_id = "top10nl_20x20", 0
 # SRID = 28992
 # BASE_DENOMINATOR = 10000
 
-DATASET, unbounded_id = "yan", -1
+#DATASET, unbounded_id = "top10nl_9x9", 0
+#SRID = 28992
+#BASE_DENOMINATOR = 10000
+
+DATASET, unbounded_id = "ei", -1
 SRID = 28992
 BASE_DENOMINATOR = 10000
 
+#DATASET, unbounded_id = "leiden_tiny", 0
+#SRID = 28992
+#BASE_DENOMINATOR = 10000
+
+# DATASET, unbounded_id = "top10nl_limburg_tiny", 0
+# SRID = 28992
+# BASE_DENOMINATOR = 10000
+
 # DATASET, unbounded_id = "clc_est", 0
+# SRID = 3035
+# BASE_DENOMINATOR = 100000
+
+# DATASET, unbounded_id = "clc_est_clean", 0
 # SRID = 3035
 # BASE_DENOMINATOR = 100000
 
@@ -116,27 +144,38 @@ BASE_DENOMINATOR = 10000
 # SRID = 32632
 # BASE_DENOMINATOR = 50000
 
-OUTPUT_DATASET_NM = DATASET
+OUTPUT_DATASET_NM = DATASET  # +"_vw"
 
 # whether to perform line simplification on the edge geometries
-do_edge_simplification = True
+do_edge_simplification = True 
 
 # whether to show detailed progress information
 # -- shows detailed progress on which face / edge is dealt with
 do_show_progress = False  # rename to do_show_trace?
 
 # whether to use the straight skeleton code as backend to generate new boundaries while splitting areas
-# -- FIXME: not operational yet (ids of nodes)
-do_use_grassfire = False
+do_use_grassfire = True
 
-# whether to check the edge geometries (polylines) for (self-) intersection during the process
-do_expensive_post_condition_check_simplify = True
+# whether to check the edge geometries (polylines) for (self-) intersection before and during the process
+do_expensive_post_condition_check_simplify = False
+
+# merge faces that have the same feature class
+do_merge_equivalent_area_patches = False
 
 # some stats on what type of vertices are created while splitting areas
-STATS_SPLIT_VERTEX_TYPES = {0: 0, 1: 0, 2: 0, 3: 0}
+# STATS_SPLIT_VERTEX_TYPES = {0: 0, 1: 0, 2: 0, 3: 0}
 
-
-print(("Processing {}".format(DATASET)))
+print(("""
+Processing:             {}""".format(DATASET)))
+print(f"""
+ Option               | Value
+----------------------+--------------------------------------------
+ edge simplification  | {do_edge_simplification}
+ show progress        | {do_show_progress}
+ use grassfire        | {do_use_grassfire}
+ check post simplify  | {do_expensive_post_condition_check_simplify}
+ merge equi-areas     | {do_merge_equivalent_area_patches}
+""")
 
 # -- greedy algorithm for simplifying
 # pick a face and random neighbour, then merge them
@@ -254,7 +293,7 @@ def main():
     # Dissolve unwanted nodes
     # degree-2
     t0 = time.time()
-    dissolve_unwanted_nodes(pp)
+    dissolve_unwanted_nodes(pp, output)
     print(f"{time.time()-t0:.3f}s dissolved unwanted nodes (degree 2)")
     # are all vertices in the quadtree ??
     #    vertex_check(pp)
@@ -265,7 +304,7 @@ def main():
 
     t0 = time.time()
     # faceseq = OrderedSequence(cmp=face_compare)
-    faceseq = pqdict.pqdict()  # oid -> priority
+    faceseq = pqdict.PQDict()  # oid -> priority
     for face in pp.faces.values():
         if face.id != pp.unbounded_id:
             faceseq[face.id] = face.info["area"]  # faceseq.add(face)
@@ -276,7 +315,7 @@ def main():
     ##        index_edges_for_face(face, pp)
 
     t0 = time.time()
-    edge_seq = pqdict.pqdict()  # oid -> priority
+    edge_seq = pqdict.PQDict()  # oid -> priority
     for edge in pp.edges.values():
         edge_seq[edge.id] = eps_for_edge_geometry(edge.geometry)
     print(f"{time.time()-t0:.3f}s priority indexed edges")
@@ -286,6 +325,53 @@ def main():
         t0 = time.time()
         check_topology_edge_geometry(pp, list(pp.edges.keys()))
         print(f"{time.time()-t0:.3f}s check edge topology (no segments intersecting)")
+
+    if do_merge_equivalent_area_patches:
+        # merge faces that have the same feature class and are neighbours
+        # this way we end up with the largest areas of the same class
+        edges_to_dissolve = dissolve_unwanted_edges(pp)
+        faces_to_merge = []
+        for d in edges_to_dissolve:
+            tmp = [d["left_face_id"], d["right_face_id"]]
+            tmp.sort()
+            faces_to_merge.append(tuple(tmp))
+        faces_to_merge = list(set(faces_to_merge))
+        print(faces_to_merge)
+        while faces_to_merge:
+            pair = faces_to_merge.pop()
+            face_id, neighbour_id = pair
+            face_id = parent(face_id, pp.face_hierarchy)
+            neighbour_id = parent(neighbour_id, pp.face_hierarchy)
+            print(
+                face_id, neighbour_id
+            )  # it can happen that multiple pairs are already dissolved?
+            if face_id != neighbour_id:
+                face_step, new_face_id, new_edge_id = merge_face_to_neighbour(
+                    face_id,
+                    neighbour_id,
+                    pp,
+                    output,
+                    faceseq,
+                    edge_seq,
+                    face_step,
+                    new_face_id,
+                    new_edge_id,
+                )
+        output_pp_wkt(pp)
+        return
+
+    # as temporary fix, enter the faces / edge ids here that do
+    # cause problems in the process (either they are skipped, or
+    # generate debug information)
+    problematic_edge_ids = set(
+        # [78142, 78101]
+    )  # 60329, 61045, 61121]) #16552]) #353, 453]) #[48815])
+    #problematic_face_ids = set([56629, 1262, 563]) #[56629, 1262, 563])# set([5620, 7434, 4930])  # 4760, 4621, 6136, 7450, 4756, 7360])
+    #problematic_face_ids = set([171000051, 171500002, 108000117, 112000033, 116003023, 128000025, 164000001, 165500001, 171500002, 171500003, 171500005, 40503518, 73500524, 80500123]) # top10nl (complete)
+    problematic_face_ids = set([4002130, 40503518, 80500123, 90000524, 94003482, 102501700, 108000117, 112000033, 116003023, 128000025, 160000032, 163000006, 164000001, 164000004, 165500001, 169500001, 171000008, 171000051, 171500002, 171500003, 171500005])
+    # problematic_face_ids = set([5930, 4930])# top10nl_9x9
+    # problematic_face_ids = set([4531949])#drenthe
+    #problematic_face_ids = set([32579])#bgt limburg
 
     #    check_vertices(pp)
     if do_edge_simplification:
@@ -299,19 +385,9 @@ def main():
         # which scale are we?
         denom_for_step = stepToScale.scale_for_step(face_step)
         # determine line simplify threshold
-        step_denom = stepToScale.step_for_scale(denom_for_step)
-        ##    small_eps = 0.1
         small_eps = stepToScale.resolution_mpp(denom_for_step)
-
-        # as temporary fix, enter the faces / edge ids here that do
-        # cause problems in the process (either they are skipped, or
-        # generate debug information)
-        problematic_edge_ids = set(
-            []
-        )  # 60329, 61045, 61121]) #16552]) #353, 453]) #[48815])
-        problematic_face_ids = set([])  # 4760, 4621, 6136, 7450, 4756, 7360])
-        # problematic_face_ids = set([5930, 4930])# top10nl_9x9
-        # problematic_face_ids = set([4531949])#drenthe
+        # backwards transform
+        step_denom = stepToScale.step_for_scale(denom_for_step)
 
         #    small_eps = 3.
         for _ in range(len(edge_seq)):
@@ -322,33 +398,38 @@ def main():
             elif eps >= small_eps:
                 break
         print(" simplifying {} edges".format(len(edge_ids_for_simplify)))
-        for edge_id in edge_ids_for_simplify:
-
+        for edge_id in sorted(edge_ids_for_simplify):
+            if do_show_progress:
+                print(f"simplify {edge_id} - at start")
             # FIXME: should we use
             # remove_edge / remove_node here ??
             # add_edge / add_node subsequently ??
-            old_edge = pp.edges[edge_id]
             needs_debug = edge_id in problematic_edge_ids
             if needs_debug:
                 output_pp_wkt(pp, "step")
                 input(f"simplify {edge_id} - starting")
-            simplified_geom, eps = simplify(
-                old_edge.geometry, pp, tolerance=small_eps, DEBUG=needs_debug
+            simplified_geom, is_simplified, eps = simplify(
+                pp, edge_id, tolerance=small_eps, DEBUG=needs_debug
+                # old_edge.geometry, pp, tolerance=small_eps, DEBUG=needs_debug
             )
-            new_edge = Edge(
-                old_edge.id,
-                old_edge.start_node_id,
-                angle(simplified_geom[0], simplified_geom[1]),
-                old_edge.end_node_id,
-                angle(
-                    simplified_geom[-1], simplified_geom[-2]
-                ),  # angle from last point to second last point
-                old_edge.left_face_id,
-                old_edge.right_face_id,
-                simplified_geom,
-                {"step_low": face_step},  # FIXME: should we replace the step-low ??
-            )
-            pp.edges[edge_id] = new_edge
+            if is_simplified:
+                output_edge(output, pp, edge_id, face_step, step_sub=2)
+                old_edge = pp.edges[edge_id]
+                new_edge = Edge(
+                    old_edge.id,
+                    old_edge.start_node_id,
+                    angle(simplified_geom[0], simplified_geom[1]),
+                    old_edge.end_node_id,
+                    angle(
+                        simplified_geom[-1], simplified_geom[-2]
+                    ),  # angle from last point to second last point
+                    old_edge.left_face_id,
+                    old_edge.right_face_id,
+                    simplified_geom,
+                    {"step_low": face_step, "step_low_sub": 2}, 
+                    # FIXME: should we replace the step-low ??
+                )
+                pp.edges[edge_id] = new_edge
 
             #            # check node relationship
             #            for node_id in (new_edge.start_node_id, new_edge.end_node_id):
@@ -365,9 +446,8 @@ def main():
 
         # quadtree
         print(
-            " simplified {} edges with small threshold := {:.3f} m^1 ".format(
-                len(edge_ids_for_simplify), small_eps
-            )
+            f" simplified {len(edge_ids_for_simplify)} edges"
+            f" with small threshold := {small_eps:.3f} m^1 "
         )
         if do_expensive_post_condition_check_simplify:
             t0 = time.time()
@@ -379,6 +459,7 @@ def main():
 
     t0 = time.time()
     processed = 0
+    rates = deque([])
     while len(faceseq) > 1:
         ## consistency check (are all points in the quadtree, note -- reversed
         ## -- i.e. all points in quadtree are they still part of an edge? --
@@ -404,7 +485,7 @@ def main():
         ## - it may also be better to split elongated water features
         ## - ...
         op = "merge"
-        if pp.faces[face_id].info["feature_class_id"] is not None and pp.faces[face_id].info["feature_class_id"] // 1000 in (10, 12):
+        if pp.faces[face_id].info["feature_class_id"] // 1000 in (10, 12):
             op = "split"
         else:
             op = "merge"
@@ -424,16 +505,20 @@ def main():
         if op == "merge":
             #########################################################
             ## Merge
-            # FIXME: compatibility of faces is not considered
+            #########################################################
+            # FIXME: 
+            # * compatibility of faces is not considered
+            # * for selecting a neighbour, also how the resulting linework
+            #   of the boundaries looks *after* the merge could be of influence
+            #   (maintain connectivity of road network is good example)
+            #########################################################
             neighbour_id = find_best_neighbour(face_id, pp)
             if do_show_progress:
                 print(
-                    " . merging face {} to {} [{}]".format(
+                    " . merging face {} {} to {}".format(
+                        "[universe]" if neighbour_id == pp.unbounded_id else "",
                         face_id,
                         neighbour_id,
-                        "universe"
-                        if neighbour_id == pp.unbounded_id
-                        else "non-universe",
                     )
                 )
             if neighbour_id is not None:
@@ -455,18 +540,22 @@ def main():
             denom_for_step = stepToScale.scale_for_step(face_step)
             # determine line simplify threshold
             cur_resolution = stepToScale.resolution_mpp(denom_for_step)
-            new_face_id, new_edge_id, new_node_id = split_face(
-                face_id,
-                pp,
-                output,
-                faceseq,
-                edge_seq,
-                face_step,
-                new_face_id,
-                new_edge_id,
-                new_node_id,
-                cur_resolution,
-            )
+            try:
+                new_face_id, new_edge_id, new_node_id = split_face(
+                    face_id,
+                    pp,
+                    output,
+                    faceseq,
+                    edge_seq,
+                    face_step,
+                    new_face_id,
+                    new_edge_id,
+                    new_node_id,
+                    cur_resolution,
+                )
+            except:
+                print(face_id)
+                raise
         #            except ValueError:
         #                print('fallback to merge')
         #                neighbour_id = find_best_neighbour(face_id, pp)
@@ -495,13 +584,14 @@ def main():
             step_denom = stepToScale.step_for_scale(denom_for_step)
 
             # simplify lines, store and replace their geometries
+            # get candidate edges for simplify from priority queue
             edge_ids_for_simplify = []
             for _ in range(len(edge_seq)):
                 edge_id, eps = edge_seq.topitem()
-                if eps < cur_resolution:
+                if eps <= cur_resolution:
                     edge_seq.pop()
                     edge_ids_for_simplify.append(edge_id)
-                elif eps >= cur_resolution:
+                else:
                     break
             #        if face_step == 352:
             if not True:
@@ -533,9 +623,10 @@ def main():
             # FIXME: should we store the old edge before simplification?
             # -------> is an edge simplified over-and-over again?       <-------
             # -------> if so, it is not nice to store all versions...   <-------
-            for edge_id in edge_ids_for_simplify:
-                #                print(f" {edge_id} will be simplified")
-                output_edge(output, pp, edge_id, face_step)
+            # when can we know whether the edge is simplified?
+            # for edge_id in edge_ids_for_simplify:
+            #     #                print(f" {edge_id} will be simplified")
+            #     output_edge(output, pp, edge_id, face_step, step_sub=2)
 
             # -- output some statistics
             # output.edge_stats.append(
@@ -550,8 +641,6 @@ def main():
             for edge_id in edge_ids_for_simplify:
                 if do_show_progress:
                     print(f"     simplifying edge {edge_id}")
-                old_edge = pp.edges[edge_id]
-
                 ##
                 needs_debug = edge_id in problematic_edge_ids
                 if needs_debug:
@@ -559,31 +648,42 @@ def main():
                     input(f"simplify {edge_id} -- {op} - starting")
                 ##
 
-                simplified_geom, eps = simplify(
-                    old_edge.geometry, pp, tolerance=cur_resolution, DEBUG=needs_debug
+                simplified_geom, is_simplified, eps = simplify(
+                    pp, edge_id, tolerance=cur_resolution, DEBUG=needs_debug
+                    # old_edge.geometry, pp, tolerance=cur_resolution, DEBUG=needs_debug
                 )
-                # = simplified_geom
-                new_edge = Edge(
-                    old_edge.id,
-                    old_edge.start_node_id,
-                    angle(simplified_geom[0], simplified_geom[1]),
-                    old_edge.end_node_id,
-                    angle(simplified_geom[-1], simplified_geom[-2]),
-                    # angle from last point to second last point
-                    old_edge.left_face_id,
-                    old_edge.right_face_id,
-                    simplified_geom,
-                    {"step_low": face_step},  # FIXME: should we replace the step-low ??
-                )
-                pp.edges[edge_id] = new_edge
+                if is_simplified:
+                    old_edge = pp.edges[edge_id]
+                    output_edge(output, pp, edge_id, face_step, step_sub=2)
+                    # = simplified_geom
+                    new_edge = Edge(
+                        old_edge.id,
+                        old_edge.start_node_id,
+                        angle(simplified_geom[0], simplified_geom[1]),
+                        old_edge.end_node_id,
+                        angle(simplified_geom[-1], simplified_geom[-2]),
+                        # angle from last point to second last point
+                        old_edge.left_face_id,
+                        old_edge.right_face_id,
+                        simplified_geom,
+                        {"step_low": face_step, "step_low_sub": 2},  # FIXME: should we replace the step-low ??
+                    )
+                    pp.edges[edge_id] = new_edge
                 edge_seq[edge_id] = eps  # _for_edge_geometry(simplified_geom)
                 # FIXME: update stars (incidence to node, given by angle)
                 # might have changed, although old value should still be in same
                 # part of angle sector around the node
+                # If this is not the case we have violated the topology
                 # FIXME: should we check angle / order of incident edges ???
                 if needs_debug:
                     output_pp_wkt(pp, "step")
                     input(f"face step - {op} - simplify - replaced edge")
+
+            # if face_step >= 13208:
+            #     try:
+            #         print("*** 78101 *** --- ***", edge_seq[78101], " ", eps, "", cur_resolution)
+            #     except:
+            #         pass
 
             if do_expensive_post_condition_check_simplify:
                 # expensive post condition check for simplification:
@@ -595,17 +695,29 @@ def main():
         ##                print(edge_id, eps, len(simplified_geom))
 
         #        if face_id == 4779:
-        #            output_pp_wkt(pp, "step")
-        #            input(f"face step - {op} - done")
+#            input(f"face step - {op} - done")
+
+        # if face_step in (1250,1251):
+        #     output_pp_wkt(pp, f"step_{face_step}")
+
 
         #    if ct > 25:
         #        break
         delta = time.time() - t0
-        if (processed % 10000) == 0:
-            # print delta, "face merging"
+        if (processed % 2_500) == 0:
+            # for node_id in pp.nodes:
+            #     node = pp.nodes[node_id]
+            #     assert len(node.star) > 0, f'node has empty star: {node_id}'
             print("{:10d} to be processed \t".format(len(faceseq)), end=" ")
             rate = (60.0 / (delta / processed)) / 60.0
-            print("rate per second {0:.0f}".format(rate))
+            rates.append(rate)
+            avg_rate = sum(rates) / len(rates)
+            print("average rate per second {0:.0f}".format(avg_rate), end="  ")
+            seconds_still_needed = len(faceseq) / avg_rate
+            if len(rates) > 10:
+                rates.popleft()
+            finish_projection = datetime.datetime.now() + datetime.timedelta(seconds=seconds_still_needed)
+            print("finishing at: {}".format(finish_projection.strftime("%Y-%m-%d %H:%M:%S")))
             t0 = time.time()
             processed = 0
             # load data and clear memory
@@ -624,11 +736,11 @@ def main():
     for face_id in pp.faces:
         if face_id != pp.unbounded_id:
             output_face(output, pp, face_id, face_step)
-            output_face_hierarchy(output, pp, face_id, pp.unbounded_id, face_step)
+            output_face_hierarchy(output, pp, face_id, pp.unbounded_id, face_step, 'merge')
 
     # -- edges
     for edge_id in pp.edges:
-        output_edge(output, pp, edge_id, face_step)
+        output_edge(output, pp, edge_id, face_step, step_sub=0)
 
     # - load the generated tgap tables to the database
     with AsyncLoader(workers=4) as loader:
@@ -640,7 +752,7 @@ def main():
     # - finalize tables: indexing + clustering
     with AsyncLoader(workers=4) as loader:
         for table in output:
-            loader.load_indexes(table)
+            loader.load_indexes(table, tablespace='indx')
             del table
 
     # - finalize tables: statistics
@@ -648,17 +760,29 @@ def main():
         for table in output:
             loader.load_statistics(table)
             del table
+
+    from .edge_simplify.visvalingham_whyatt import CT_NOT_SIMPLIFIED, CT_SIMPLIFIED
+    print("not simplified ->", CT_NOT_SIMPLIFIED)
+    print("    simplified ->", CT_SIMPLIFIED)
+
+
+
+#    import pprint
+#    pprint.pprint(STATS_SPLIT_VERTEX_TYPES)
     duration_in_secs = time.time() - start_process_t0
-
-    import pprint
-
-    pprint.pprint(STATS_SPLIT_VERTEX_TYPES)
     print(
         "process duration:    {0[0]:d} days {0[1]} hours {0[2]} minutes {0[3]:.3f} seconds".format(
             normalize_seconds(duration_in_secs)
         )
     )
-
+#    tic = time.time()
+#    with connection(False) as db:
+#        for which in ("low", "high"):
+#            sql = f"alter table {DATASET}_tgap_edge add column step_{which}_frac float;"
+#            db.execute(sql)
+#            sql = f"update {DATASET}_tgap_edge set step_{which}_frac = step_{which} + step_{which}_sub / 3.0;"
+#            db.execute(sql)
+#    print(f"post-processed low/high columns: {time.time()-tic:.3f}s")
 
 def check_topology_edge_geometry(pp, edge_ids):
     """Check for (self-) intersections of edge geometries"""
@@ -788,14 +912,16 @@ def merge_face_to_neighbour(
         new_edge_id += 1
         merge_edge_pair(pair, node_id, new_edge_id, pp, edge_seq, output, face_step)
 
-    for node_id in nodes_to_check:
+    for node_id in set(nodes_to_check): # remove dups for checking
+        # print(f'checking node {node_id}')
         if node_id in pp.nodes:
             if len(pp.nodes[node_id].star) == 0:
+                # print(" and removing it")
                 remove_node(node_id, pp)
 
     if neighbour_id != pp.unbounded_id:
         # set the new face its priority
-        face = pp.faces[new_face_id]
+        face = pp.faces[neighbour_id]
         # materialize geometry for this new face
         # FIXME: if only area and perimeter are needed, we do not need this:
         # we then keep this as thematic/administrative information on a face
@@ -811,7 +937,7 @@ def merge_face_to_neighbour(
         face.info["ipq"] = iso_perimetric_quotient
         # face.info['priority'] = face.info['area'] * face.info['ipq']
         face.info["priority"] = face.info["area"]
-        faceseq[new_face_id] = face.info["priority"]
+        faceseq[neighbour_id] = face.info["priority"]
     return face_step, new_face_id, new_edge_id
 
 
@@ -827,8 +953,8 @@ def split_face(
     new_node_id,
     resolution,
 ):
-    #    if face_id == 301:
-    #        output_pp_wkt(pp, 'split301')
+    # if face_id in (20384, ):
+    #     output_pp_wkt(pp, f'split{face_id}')
 
     #    if face_id in (4781, 4791):
     #        output_pp_wkt(pp, 'step')
@@ -843,17 +969,19 @@ def split_face(
     edge_ids_in_wheel = set(map(positive_id, pp.faces[face_id].edges))
 
     assert len(edge_ids_in_wheel) > 0
-
+    # STOP = 1
     # FIXME: We left out classifying a hole for a node as type=2 VertexInfo
     # We should bail out of split and just merge
     # (does not seem to be a point in triangulating and splitting when we just merge?)
-    #        neighbours = []
-    #        for edge_id in edge_ids_in_wheel:
-    #            edge = pp.edges[edge_id]
-    #            lf_id = parent(edge.left_face_id, pp.face_hierarchy)
-    #            rf_id = parent(edge.right_face_id, pp.face_hierarchy)
-    #            neighbour_id = rf_id if face_id == lf_id else lf_id
-    #            neighbours.append(neighbour_id)
+    neighbour_ids = set([])
+    for edge_id in edge_ids_in_wheel:
+        edge = pp.edges[edge_id]
+        lf_id = parent(edge.left_face_id, pp.face_hierarchy)
+        rf_id = parent(edge.right_face_id, pp.face_hierarchy)
+        neighbour_id = rf_id if face_id == lf_id else lf_id
+        assert neighbour_id != face_id
+        neighbour_ids.add(neighbour_id)
+    
     #        is_hole = len(set(neighbours)) == 1
 
     #        wheels = get_wheel_edges(pp.faces[face_id].edges, pp)
@@ -963,18 +1091,26 @@ def split_face(
         # print(info)
         converter.add_point(v, info=info)
 
-    from splitarea.densify import densify
 
+    from splitarea.densify import densify
+    # FIXME: for the straight skeleton densifying straight lines 
+    # means more work for the algorithm
+    # (it is related to how many vertices start)
+    # but will not change the shape of the final skeleton
     densified_geometry = {}
     for edge_id in edge_ids_in_wheel:
-        densified_geometry[edge_id] = densify(pp.edges[edge_id].geometry)
+        if do_use_grassfire:
+            densified_geometry[edge_id] = pp.edges[edge_id].geometry
+        else:
+            densified_geometry[edge_id] = densify(pp.edges[edge_id].geometry, small=2.0*resolution)
 
     for edge_id in edge_ids_in_wheel:
         edge = pp.edges[edge_id]
         lf_id = parent(edge.left_face_id, pp.face_hierarchy)
         rf_id = parent(edge.right_face_id, pp.face_hierarchy)
         # go over the geometry (but not the end points)
-        for pt in densified_geometry[edge_id][1:-1]:  ##edge.geometry[1:-1]:
+        #for pt in edge.geometry[1:-1]: #densified_geometry[edge_id][1:-1]:  ##edge.geometry[1:-1]:
+        for pt in densified_geometry[edge_id][1:-1]:
             v = (pt.x, pt.y)
             tp = 0
             node = None
@@ -985,7 +1121,8 @@ def split_face(
 
     for edge_id in edge_ids_in_wheel:
         edge = pp.edges[edge_id]
-        tmp = [(pt.x, pt.y) for pt in densified_geometry[edge_id]]  # edge.geometry]
+        # tmp = [(pt.x, pt.y) for pt in edge.geometry]#densified_geometry[edge_id]]  # edge.geometry]
+        tmp = [(pt.x, pt.y) for pt in densified_geometry[edge_id]]
         for pair in zip(tmp, tmp[1:]):
             converter.add_segment(pair[0], pair[1])
 
@@ -1030,104 +1167,271 @@ def split_face(
         # use grassfire
         from grassfire import calc_skel
 
-        skel = calc_skel(converter, shrink=True, internal_only=True)
+        try:
+            skel = calc_skel(converter, shrink=True, internal_only=True)
+        except:
+            print(f"problem splitting: {face_id} ")
+            output_pp_wkt(pp, f'problematic_split_{face_id}')
+            raise
 
-        class GrassfireVertexInfo:
-            def __init__(self, tp, face_ids, vertex_id):
-                self.type = tp
-                self.face_ids = face_ids
-                self.vertex_id = vertex_id
 
-        class GrassfireTemporaryVertex:
-            def __init__(self, pt, info):
-                self.x, self.y = pt[0], pt[1]
-                self.info = info
+        from .geomgraph import label_segments
+        unique_ids = 0
+        unlabelled = []
+        for segment in skel.segments():
+            (start, end), (start_info, end_info), = segment
+            unique_ids += 1
+            unlabelled.append([start, end])
 
-        class GrassfireSegments:
-            def __init__(self, skel):
-                self.skel = skel
-                self.segments = []
-                self.ext_segments = []
-                self._produce_segments()
+        labelled = []
+        for edge_id in edge_ids_in_wheel: ##densified_geometry:
+            edge = pp.edges[edge_id]
+            start_node_id = edge.start_node_id
+            end_node_id = edge.end_node_id
+            left_face_id = parent(edge.left_face_id, pp.face_hierarchy)
+            right_face_id = parent(edge.right_face_id, pp.face_hierarchy)
 
-            def _produce_segments(self):
-                """ produce the segments (will be called by constructor) """
-                from simplegeom.geometry import Point
+            # g = edge.geometry 
+            g = densified_geometry[edge_id]
+            # edge_id
+            # start_node_id
+            # end_node_id
+            # left_face_id
+            # right_face_id
+            # geometry
+            last_idx = len(g) - 2
+            for idx, (orig, dest) in enumerate(zip(g, g[1:])):
+                unique_ids += 1
+                if idx == 0:
+                    s = start_node_id
+                else:
+                    s = None
+                if idx == last_idx:
+                    e = end_node_id
+                else:
+                    e = None
 
-                do_output = True
-                if do_output:
-                    with open("/tmp/nodes_gf.wkt", "w") as fh:
-                        fh.write("wkt;info\n")
+                labelled.append(
+                    (unique_ids, s, e, left_face_id, right_face_id, [(orig.x, orig.y), (dest.x, dest.y)])
+                )
+            # post condition: 
+            # the last labelled segment has the end node id of the edge
+            assert labelled[-1][2] == end_node_id
 
-                for segment in skel.segments():
-                    #                    print(segment)
-                    (start, end), (start_info, end_info), = segment
-                    # see harvest.py in splitarea
-                    # TYPE 0
-                    # Intermediate vertex on an edge, no need to make connection to this
-                    # node
-                    #
-                    # TYPE 1
-                    # node in topology, there needs to be made a connection to this node
-                    # => vertex_id is the node_id of the topology
-                    #
-                    # TYPE 2
-                    # E.g. Hole that needs to be dissolved completely, but for that we need
-                    # to propagate same label on the whole skeleton!
-                    # => face_ids is integer of the face that forms the hole
-                    #
-                    # TYPE 3
-                    # for touching rings, we need to have a node sector list:
-                    # angles that bound a certain face, so that we can get the correct face
-                    # that overlaps
-                    # => face_ids is list with 'node sectors', describing which face is valid for
-                    #    which part around the node (based on start and end angle of that sector)
-                    if start_info is not None:
-                        # top10nl_9x9 (not many touching rings -- really execptional case)
-                        # {0: 23595, 1: 19778, 2: 157, 3: 0}
-                        #                        if start_info.type == 0:
-                        #                            continue
+        try:
+            skeleton_edges, new_node_id, new_edge_id = label_segments(labelled, unlabelled, face_id, new_node_id, new_edge_id, pp.unbounded_id, srid=SRID)
+        except AssertionError:
+            output_pp_wkt(pp, 'problematic_split')
+            with open('/tmp/quadtree.csv', 'w') as fh:
+                pp.quadtree.serialize_points(fh)
+            raise
 
-                        STATS_SPLIT_VERTEX_TYPES[start_info.type] += 1
-                        v0 = Point(start[0], start[1])
-                        v1 = Point(end[0], end[1])
-                        lf, rf = None, None
-                        if do_output:
-                            with open("/tmp/nodes_gf.wkt", "a") as fh:
-                                fh.write(f"{v0};{start_info}\n")
+        #nodes_in_common_boundary = set([])
+        nodes_to_check = []
+        for edge_id in edge_ids_in_wheel: # 'common boundary'
+            # remember the nodes
+            edge = pp.edges[edge_id]
+            # nodes_in_common_boundary.add(edge.start_node_id)
+            # nodes_in_common_boundary.add(edge.end_node_id)
+            #
+            output_edge(output, pp, edge_id, face_step, step_sub=0)
+            nodes_to_check.extend(remove_edge(edge_id, pp, edge_seq))
 
-                        self.ext_segments.append((v0, v1, lf, rf))
-                    else:
-                        #                        v0 = Point(start[0], start[1])
-                        #                        v1 = Point(end[0], end[1])
-                        v0 = GrassfireTemporaryVertex(
-                            start, GrassfireVertexInfo(None, None, None)
-                        )
-                        v1 = GrassfireTemporaryVertex(
-                            end, GrassfireVertexInfo(None, None, None)
-                        )
-                        self.segments.append((v0, v1))
+        for edge in skeleton_edges:
+            (edge_id, start_node_id, end_node_id, left_face_id, right_face_id, geometry) = edge
+            pp.edges[edge_id] = Edge(
+                edge_id,
+                start_node_id,
+                angle(geometry[0], geometry[1]),
+                end_node_id,
+                angle(
+                    geometry[-1], geometry[-2]
+                ),  # angle from last point to second last point
+                left_face_id,
+                right_face_id,
+                geometry,
+                {"step_low": face_step, "step_low_sub": 0},
+            )  # FIXME: Keep info on merged edge?
+            assert left_face_id is not None
+            assert right_face_id is not None
+            # update faces
+            pp.faces[parent(left_face_id, pp.face_hierarchy)].edges.add(edge_id)
+            pp.faces[parent(right_face_id, pp.face_hierarchy)].edges.add(~edge_id)
+            # update nodes
+            nodes = pp.nodes
+            edges = pp.edges
+            edge = pp.edges[edge_id]
+            # start node
+            if edge.start_node_id not in nodes:
+                pt = edge.geometry[0]
+                nodes[edge.start_node_id] = Node(edge.start_node_id, pt, [])
+                pp.quadtree.add((pt.x, pt.y))
+            nodes[edge.start_node_id].star.append(edge_id)
+            # end node
+            if edge.end_node_id not in nodes:
+                pt = edge.geometry[-1]
+                pp.quadtree.add((pt.x, pt.y))
+                nodes[edge.end_node_id] = Node(edge.end_node_id, pt, [])
+            nodes[edges[edge_id].end_node_id].star.append(~edge_id)
+            # update quadtree
+            first, last = 0, len(edge.geometry) - 1
+            for i, pt in enumerate(edge.geometry):
+                if i == first or i == last:
+                    continue
+                pp.quadtree.add((pt.x, pt.y))
 
-        visitor = GrassfireSegments(skel)
-        if True:
-            with open("/tmp/skel2.wkt", "w") as fh:
-                fh.write("wkt\n")
-                for seg in visitor.ext_segments:
-                    fh.write(
-                        "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
-                    )
+            # sort edges counter clockwise (?) around a node
+            sort_on_angle = partial(get_correct_angle, edges=edges)
+            for tmp_node_id in [start_node_id, end_node_id]:
+                nodes[node_id].star.sort(key=sort_on_angle)
+            del tmp_node_id
 
-            with open("/tmp/skel3.wkt", "w") as fh:
-                fh.write("wkt\n")
-                for seg in visitor.segments:
-                    fh.write(
-                        "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
-                    )
-            output_pp_wkt(pp, "split_problem")
-            input("paused after grassfire")
-    if (
-        True
-    ):  # FIXME: replace to else: of use_grassfire condition, once making a graph for that works!
+            pp.edge_hierarchy[edge_id] = None
+            if edge_seq is not None:
+                eps = eps_for_edge_geometry(geometry)
+                edge_seq[edge_id] = eps
+                ## print(f"   >>> new eps value {eps} for edge {edge_id}")
+
+#            input('gf split')
+
+        nodes_to_merge = []
+        for node_id in nodes_to_check:
+            node = pp.nodes[node_id]
+            # print(node_id, len(node.star))
+            if len(node.star) == 2:
+                nodes_to_merge.append(node_id)
+
+        # merge edges
+        pairs = edge_pairs(nodes_to_merge, pp)
+        for pair, node_id in pairs:
+            new_edge_id += 1
+            merge_edge_pair(pair, node_id, new_edge_id, pp, edge_seq, output, face_step)
+
+        for node_id in nodes_to_check:
+            if node_id in pp.nodes:
+                if len(pp.nodes[node_id].star) == 0:
+                    remove_node(node_id, pp)
+
+
+        #########################################
+        # Output the splittee and remove it
+        output_face(output, pp, face_id, face_step)
+
+        # Directed Acyclic Graph
+        for neighbour_id in neighbour_ids:
+            output_face_hierarchy(output, pp, face_id, neighbour_id, face_step, 'split')
+
+        remove_face(face_id, pp)
+
+#        if face_id in (4549, 5459):
+#            output_pp_wkt(pp, f'split{face_id}_after')
+#            input('paused after splitting')
+
+        return new_face_id, new_edge_id, new_node_id
+
+#        with open("/tmp/interior_segs.wkt", "w") as fh:
+#            fh.write("wkt\n")
+#            for segment in skel.segments():
+#                #                    print(segment)
+#                (start, end), (start_info, end_info), = segment
+#                fh.write(f"LINESTRING({start[0]} {start[1]}, {end[0]} {end[1]})")
+#                fh.write("\n")
+#        raise ValueError("stop")
+
+#        class GrassfireVertexInfo:
+#            def __init__(self, tp, face_ids, vertex_id):
+#                self.type = tp
+#                self.face_ids = face_ids
+#                self.vertex_id = vertex_id
+
+#        class GrassfireTemporaryVertex:
+#            def __init__(self, pt, info):
+#                self.x, self.y = pt[0], pt[1]
+#                self.info = info
+
+#        class GrassfireSegments:
+#            def __init__(self, skel):
+#                self.skel = skel
+#                self.segments = []
+#                self.ext_segments = []
+#                self._produce_segments()
+
+#            def _produce_segments(self):
+#                """ produce the segments (will be called by constructor) """
+#                from simplegeom.geometry import Point
+
+#                do_output = True
+#                if do_output:
+#                    with open("/tmp/nodes_gf.wkt", "w") as fh:
+#                        fh.write("wkt;info\n")
+
+#                for segment in skel.segments():
+#                    #                    print(segment)
+#                    (start, end), (start_info, end_info), = segment
+#                    # see harvest.py in splitarea
+#                    # TYPE 0
+#                    # Intermediate vertex on an edge, no need to make connection to this
+#                    # node
+#                    #
+#                    # TYPE 1
+#                    # node in topology, there needs to be made a connection to this node
+#                    # => vertex_id is the node_id of the topology
+#                    #
+#                    # TYPE 2
+#                    # E.g. Hole that needs to be dissolved completely, but for that we need
+#                    # to propagate same label on the whole skeleton!
+#                    # => face_ids is integer of the face that forms the hole
+#                    #
+#                    # TYPE 3
+#                    # for touching rings, we need to have a node sector list:
+#                    # angles that bound a certain face, so that we can get the correct face
+#                    # that overlaps
+#                    # => face_ids is list with 'node sectors', describing which face is valid for
+#                    #    which part around the node (based on start and end angle of that sector)
+#                    if start_info is not None:
+#                        # top10nl_9x9 (not many touching rings -- really execptional case)
+#                        # {0: 23595, 1: 19778, 2: 157, 3: 0}
+#                        #                        if start_info.type == 0:
+#                        #                            continue
+
+#                        STATS_SPLIT_VERTEX_TYPES[start_info.type] += 1
+#                        v0 = Point(start[0], start[1])
+#                        v1 = Point(end[0], end[1])
+#                        lf, rf = None, None
+#                        if do_output:
+#                            with open("/tmp/nodes_gf.wkt", "a") as fh:
+#                                fh.write(f"{v0};{start_info}\n")
+
+#                        self.ext_segments.append((v0, v1, lf, rf))
+#                    else:
+#                        #                        v0 = Point(start[0], start[1])
+#                        #                        v1 = Point(end[0], end[1])
+#                        v0 = GrassfireTemporaryVertex(
+#                            start, GrassfireVertexInfo(None, None, None)
+#                        )
+#                        v1 = GrassfireTemporaryVertex(
+#                            end, GrassfireVertexInfo(None, None, None)
+#                        )
+#                        self.segments.append((v0, v1))
+
+#        visitor = GrassfireSegments(skel)
+#        if True:
+#            with open("/tmp/skel2.wkt", "w") as fh:
+#                fh.write("wkt\n")
+#                for seg in visitor.ext_segments:
+#                    fh.write(
+#                        "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
+#                    )
+
+#            with open("/tmp/skel3.wkt", "w") as fh:
+#                fh.write("wkt\n")
+#                for seg in visitor.segments:
+#                    fh.write(
+#                        "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
+#                    )
+#            output_pp_wkt(pp, "split_problem")
+#            input("paused after grassfire")
+    else:  # FIXME: replace to else: of use_grassfire condition, once making a graph for that works!
         # use splitarea
         try:
             dt = triangulate(converter.points, converter.infos, converter.segments)
@@ -1190,118 +1494,118 @@ def split_face(
 
         if len(interior) == 0:
             raise NotImplementedError(
-                "no triangles in the interior of the shape -- fix the line simplification, or enable this workaround - which is not well functioning"
+                "no triangles in the interior of the shape"
             )
-            # no triangles in the interior -- workaround for simplification allowing
-            # collapse of edges on top of each other -- to be removed once simplification
-            # works fully correct (i.e. fully topologically safe) again
-            #
-            # let's assume that there are exactly 2 edges running on top of each other
-            # bounding this face (stemming from line simplification, simplified the edges too far)
-            #
-            # note, there should be exactly 2 for our logic to hold
-            assert len(pp.faces[face_id].edges) == 2
-            # get all edges that are bounding the face
-            edge_ids_in_wheel = set(map(positive_id, pp.faces[face_id].edges))
-            new_edges = []
-            for edge_id in edge_ids_in_wheel:
-                edge = pp.edges[edge_id]
-                lf_id = parent(edge.left_face_id, pp.face_hierarchy)
-                rf_id = parent(edge.right_face_id, pp.face_hierarchy)
-                sn_id = edge.start_node_id
-                en_id = edge.end_node_id
-                new_edge_id += 1
-                new_edges.append(
-                    [new_edge_id, lf_id, rf_id, sn_id, en_id, edge.geometry]
-                )
-            # FIXME: we use the first edge of the two, find correct neighbours for these two
-            new_edge = new_edges[0]
-            other_edge = new_edges[1]
-            # figure out which face is on the side that is not the current face
-            if other_edge[1] == face_id:
-                other_side_face_id = other_edge[2]
-            else:
-                assert other_edge[2] == face_id
-                other_side_face_id = other_edge[1]
+#            # no triangles in the interior -- workaround for simplification allowing
+#            # collapse of edges on top of each other -- to be removed once simplification
+#            # works fully correct (i.e. fully topologically safe) again
+#            #
+#            # let's assume that there are exactly 2 edges running on top of each other
+#            # bounding this face (stemming from line simplification, simplified the edges too far)
+#            #
+#            # note, there should be exactly 2 for our logic to hold
+#            assert len(pp.faces[face_id].edges) == 2
+#            # get all edges that are bounding the face
+#            edge_ids_in_wheel = set(map(positive_id, pp.faces[face_id].edges))
+#            new_edges = []
+#            for edge_id in edge_ids_in_wheel:
+#                edge = pp.edges[edge_id]
+#                lf_id = parent(edge.left_face_id, pp.face_hierarchy)
+#                rf_id = parent(edge.right_face_id, pp.face_hierarchy)
+#                sn_id = edge.start_node_id
+#                en_id = edge.end_node_id
+#                new_edge_id += 1
+#                new_edges.append(
+#                    [new_edge_id, lf_id, rf_id, sn_id, en_id, edge.geometry]
+#                )
+#            # FIXME: we use the first edge of the two, find correct neighbours for these two
+#            new_edge = new_edges[0]
+#            other_edge = new_edges[1]
+#            # figure out which face is on the side that is not the current face
+#            if other_edge[1] == face_id:
+#                other_side_face_id = other_edge[2]
+#            else:
+#                assert other_edge[2] == face_id
+#                other_side_face_id = other_edge[1]
 
-            # update the neighbour
-            if new_edge[1] == face_id:
-                new_edge[1] = other_side_face_id
-            else:
-                new_edge[2] = other_side_face_id
+#            # update the neighbour
+#            if new_edge[1] == face_id:
+#                new_edge[1] = other_side_face_id
+#            else:
+#                new_edge[2] = other_side_face_id
 
-            # the current face is not one of the neighbours any more
-            assert new_edge[1] != face_id
-            assert new_edge[2] != face_id
+#            # the current face is not one of the neighbours any more
+#            assert new_edge[1] != face_id
+#            assert new_edge[2] != face_id
 
-            # remove the old 2 edges
-            for edge_id in edge_ids_in_wheel:
-                output_edge(output, pp, edge_id, face_step)
-                remove_edge(edge_id, pp, edge_seq)
+#            # remove the old 2 edges
+#            for edge_id in edge_ids_in_wheel:
+#                output_edge(output, pp, edge_id, face_step)
+#                remove_edge(edge_id, pp, edge_seq)
 
-            # add 1 new edge, with correct neighbours
-            edge_id, left_face_id, right_face_id, start_node_id, end_node_id, geometry = (
-                new_edge
-            )
-            edge = Edge(
-                edge_id,
-                start_node_id,
-                angle(geometry[0], geometry[1]),
-                end_node_id,
-                angle(
-                    geometry[-1], geometry[-2]
-                ),  # angle from last point to second last point
-                left_face_id,
-                right_face_id,
-                geometry,
-                {"step_low": face_step},
-            )  # FIXME: Keep info on merged edge?
-            pp.edges[edge_id] = edge
+#            # add 1 new edge, with correct neighbours
+#            edge_id, left_face_id, right_face_id, start_node_id, end_node_id, geometry = (
+#                new_edge
+#            )
+#            edge = Edge(
+#                edge_id,
+#                start_node_id,
+#                angle(geometry[0], geometry[1]),
+#                end_node_id,
+#                angle(
+#                    geometry[-1], geometry[-2]
+#                ),  # angle from last point to second last point
+#                left_face_id,
+#                right_face_id,
+#                geometry,
+#                {"step_low": face_step},
+#            )  # FIXME: Keep info on merged edge?
+#            pp.edges[edge_id] = edge
 
-            # update faces
-            pp.faces[parent(left_face_id, pp.face_hierarchy)].edges.add(edge_id)
-            pp.faces[parent(right_face_id, pp.face_hierarchy)].edges.add(~edge_id)
+#            # update faces
+#            pp.faces[parent(left_face_id, pp.face_hierarchy)].edges.add(edge_id)
+#            pp.faces[parent(right_face_id, pp.face_hierarchy)].edges.add(~edge_id)
 
-            # update nodes
-            nodes = pp.nodes
-            edges = pp.edges
-            edge = pp.edges[edge_id]
+#            # update nodes
+#            nodes = pp.nodes
+#            edges = pp.edges
+#            edge = pp.edges[edge_id]
 
-            # start node
-            if edge.start_node_id not in nodes:
-                pt = edge.geometry[0]
-                nodes[edge.start_node_id] = Node(edge.start_node_id, pt, [])
-                pp.quadtree.add((pt.x, pt.y))
-            nodes[edge.start_node_id].star.append(edge_id)
-            # end node
-            if edge.end_node_id not in nodes:
-                pt = edge.geometry[-1]
-                pp.quadtree.add((pt.x, pt.y))
-                nodes[edge.end_node_id] = Node(edge.end_node_id, pt, [])
-            nodes[edges[edge_id].end_node_id].star.append(~edge_id)
+#            # start node
+#            if edge.start_node_id not in nodes:
+#                pt = edge.geometry[0]
+#                nodes[edge.start_node_id] = Node(edge.start_node_id, pt, [])
+#                pp.quadtree.add((pt.x, pt.y))
+#            nodes[edge.start_node_id].star.append(edge_id)
+#            # end node
+#            if edge.end_node_id not in nodes:
+#                pt = edge.geometry[-1]
+#                pp.quadtree.add((pt.x, pt.y))
+#                nodes[edge.end_node_id] = Node(edge.end_node_id, pt, [])
+#            nodes[edges[edge_id].end_node_id].star.append(~edge_id)
 
-            # update quadtree
-            first, last = 0, len(edge.geometry) - 1
-            for i, pt in enumerate(edge.geometry):
-                if i == first or i == last:
-                    continue
-                pp.quadtree.add((pt.x, pt.y))
+#            # update quadtree
+#            first, last = 0, len(edge.geometry) - 1
+#            for i, pt in enumerate(edge.geometry):
+#                if i == first or i == last:
+#                    continue
+#                pp.quadtree.add((pt.x, pt.y))
 
-            sort_on_angle = partial(get_correct_angle, edges=edges)
-            for tmp_node_id in [start_node_id, end_node_id]:
-                nodes[node_id].star.sort(key=sort_on_angle)
-            del tmp_node_id
+#            sort_on_angle = partial(get_correct_angle, edges=edges)
+#            for tmp_node_id in [start_node_id, end_node_id]:
+#                nodes[node_id].star.sort(key=sort_on_angle)
+#            del tmp_node_id
 
-            pp.edge_hierarchy[edge_id] = None
-            if edge_seq is not None:
-                eps = eps_for_edge_geometry(geometry)
-                edge_seq[edge_id] = eps
+#            pp.edge_hierarchy[edge_id] = None
+#            if edge_seq is not None:
+#                eps = eps_for_edge_geometry(geometry)
+#                edge_seq[edge_id] = eps
 
-            output_face(output, pp, face_id, face_step)
-            # FIXME: output_face_hierarchy ?
-            remove_face(face_id, pp)
+#            output_face(output, pp, face_id, face_step)
+#            # FIXME: output_face_hierarchy ?
+#            remove_face(face_id, pp)
 
-            return new_face_id, new_edge_id, new_node_id
+#            return new_face_id, new_edge_id, new_node_id
 
             # raise ValueError("no triangles (collapsed face for splitting)")
         #    for t in interior:
@@ -1329,7 +1633,7 @@ def split_face(
         # in case there exists a sharp and narrow turn in the polygon
         # (but it does give a nicer, = less jaggy, less sharp angles, center line
         Harvester = EdgeEdgeHarvester
-        # Harvester = MidpointHarvester
+        #Harvester = MidpointHarvester
         # get centerline segments
         visitor = Harvester(interior)
         visitor.skeleton_segments()
@@ -1345,155 +1649,340 @@ def split_face(
     #                fh.write("LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg))
 
     # -- make graph structure based on segments
-    new_edge_id += 1
-    new_node_id += 1
-    #        try:
-    skeleton, new_edge_id = make_graph(
-        ext, visitor, new_edge_id, universe_id=unbounded_id, srid=SRID
-    )
+#    new_edge_id += 1
+#    new_node_id += 1
+#    #        try:
+#    skeleton, new_edge_id = make_graph(
+#        ext, visitor, new_edge_id, universe_id=unbounded_id, srid=SRID
+#    )
 
-    if False:  # face_id == 19126:
-        with open("/tmp/out_all_raised.wkt", "w") as fh, open(
-            "/tmp/out_edges_raised.wkt", "w"
-        ) as fhe, open("/tmp/out_it_raised.wkt", "w") as fhit, open(
-            "/tmp/out_vertices.wkt", "w"
-        ) as fhv:
-            #        , open(
-            #            "/tmp/ext_edges.wkt", "w"
-            #        ) as fhext:
-            print("visited", it.visited)
-            output_triangles(dt.triangles, fh)
-            output_triangles(interior, fhit)
-            output_edges(FiniteEdgeIterator(dt, constraints_only=True), fhe)
-            output_vertices(dt.vertices, fhv)
+#    if face_step > STOP:
+#        from simplegeom.geometry import LineString, Point
+        from .geomgraph import label_segments
+        unique_ids = 0
+        unlabelled = []
+    #    with open("/tmp/split_segments.wkt", "w") as fh:
+    #        fh.write("container;wkt")
+    #        fh.write("\n")
+        for i, container in enumerate([visitor.segments, visitor.ext_segments]):
+            for segment in container:
+                v0 = segment[0]
+                v1 = segment[1]
+#                ln = LineString(srid=SRID)
+#                ln.append(Point(v0.x, v0.y))
+#                ln.append(Point(v1.x, v1.y))
 
-        #            # output_external edges
-        #            fhext.write("id;sn;sa;lf;rf;wkt\n")
-        #            for edge in ext:
-        #                fhext.write(";".join(map(str, edge)))
-        #                fhext.write("\n")
+                unique_ids += 1
+                unlabelled.append([(v0.x, v0.y), (v1.x, v1.y)])
+    #                fh.write(f"{i};{ln}")
+    #                fh.write("\n")
 
-        #        with open("/tmp/skel2.wkt", "w") as fh:
-        #            fh.write("wkt\n")
-        #            for seg in visitor.ext_segments:
-        #                fh.write(
-        #                    "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
-        #                )
+        labelled = []
+    #    with open("/tmp/surrounding_split_segments.wkt", "w") as fh:
+    #        fh.write("edge_id;wkt;start_node_id;end_node_id;left_face_id;right_face_id")
+    #        fh.write("\n")
+        for edge_id in edge_ids_in_wheel: ##densified_geometry:
+            edge = pp.edges[edge_id]
+            start_node_id = edge.start_node_id
+            end_node_id = edge.end_node_id
+            left_face_id = parent(edge.left_face_id, pp.face_hierarchy)
+            right_face_id = parent(edge.right_face_id, pp.face_hierarchy)
 
-        #        with open("/tmp/skel3.wkt", "w") as fh:
-        #            fh.write("wkt\n")
-        #            for seg in visitor.segments:
-        #                fh.write(
-        #                    "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
-        #                )
-        input("triangles for split stored")
+            # g = edge.geometry 
+            g = densified_geometry[edge_id]
+            # edge_id
+            # start_node_id
+            # end_node_id
+            # left_face_id
+            # right_face_id
+            # geometry
+            last_idx = len(g) - 2
+            for idx, (orig, dest) in enumerate(zip(g, g[1:])):
+                unique_ids += 1
+                if idx == 0:
+                    s = start_node_id
+                else:
+                    s = None
+                if idx == last_idx:
+                    e = end_node_id
+                else:
+                    e = None
 
-    label_sides(skeleton)
+                labelled.append(
+                    (unique_ids, s, e, left_face_id, right_face_id, [(orig.x, orig.y), (dest.x, dest.y)])
+                )
+            # post condition: the last one has the (end) node id of the edge
+            assert labelled[-1][2] == end_node_id
 
-    for edge in skeleton.half_edges.values():
-        assert edge.left_face is not None
-        assert edge.right_face is not None
+#        labelled = []
+#    #    with open("/tmp/surrounding_split_segments.wkt", "w") as fh:
+#    #        fh.write("edge_id;wkt;start_node_id;end_node_id;left_face_id;right_face_id")
+#    #        fh.write("\n")
+#        for edge_id in densified_geometry:
+#            edge = pp.edges[edge_id]
+#            start_node_id = edge.start_node_id
+#            end_node_id = edge.end_node_id
 
-    #        if face_id == 2100:
-    #            output_topomap_wkt(skeleton, 'post_label')
-    #        raw_input('pause')
-    #        output_topomap_wkt(skeleton)
-    #        try:
-    prune_branches(skeleton)
+#            left_face_id = parent(edge.left_face_id, pp.face_hierarchy)
+#            right_face_id = parent(edge.right_face_id, pp.face_hierarchy)
 
-    #        if face_id == 2100:
-    #            output_topomap_wkt(skeleton, 'pruned')
-    #        except AssertionError:
-    #            output_pp_wkt(pp)
-    #            output_topomap_wkt(skeleton, 'fail_assert')
-    #            with open('/tmp/out_vertices.wkt', 'w') as fhv:
-    #                output_vertices(dt.vertices, fhv)
-    #            raise
+#            g = densified_geometry[edge_id]
+#            # edge_id
+#            # start_node_id
+#            # end_node_id
+#            # left_face_id
+#            # right_face_id
+#            # geometry
+#            last_idx = len(g) - 1
+#            for idx, (orig, dest) in enumerate(zip(g, g[1:])):
+#                unique_ids += 1
+#                if idx == 0:
+#                    s = start_node_id
+#                else:
+#                    s = None
+#                if idx == last_idx:
+#                    e = end_node_id
+#                else:
+#                    e = None
 
-    ########################################
-    # -- make polylines of segments
-    groups = define_groups(skeleton)
-    new_node_id = make_new_node_ids(skeleton, new_node_id)
-    new_edges, new_edge_id = make_new_edges(groups, new_edge_id)
+#                labelled.append(
+#                    (unique_ids, s, e, left_face_id, right_face_id, [(orig.x, orig.y), (dest.x, dest.y)])
+#                )
 
-    ########################################
-    # -- Remove old edges (all edges with a relation to the face)
-    # face_step += 1
-    for edge_id in edges_incident_to_face:
-        output_edge(output, pp, edge_id, face_step)
-        remove_edge(edge_id, pp, edge_seq)
+#    #            fh.write(
+#    #                f"{edge.id};{densified_geometry[edge_id]};{start_node_id};{end_node_id};{left_face_id};{right_face_id}"
+#    #            )
+#    #            fh.write("\n")
 
-    # -- Add all new edges to the planar partition
-    for (
-        edge_id,
-        start_node_id,
-        end_node_id,
-        left_face_id,
-        right_face_id,
-        geometry,
-    ) in new_edges:
-        # make new edge and
-        # add it to the planar partition
-        # FIXME: this should be methods add_edge / add_node / add_face
-        # in the datastructure module
-        pp.edges[edge_id] = Edge(
-            edge_id,
-            start_node_id,
-            angle(geometry[0], geometry[1]),
-            end_node_id,
-            angle(
-                geometry[-1], geometry[-2]
-            ),  # angle from last point to second last point
-            left_face_id,
-            right_face_id,
-            geometry,
-            {"step_low": face_step},
-        )  # FIXME: Keep info on merged edge?
-        # update faces
-        pp.faces[parent(left_face_id, pp.face_hierarchy)].edges.add(edge_id)
-        pp.faces[parent(right_face_id, pp.face_hierarchy)].edges.add(~edge_id)
-        # update nodes
-        nodes = pp.nodes
-        edges = pp.edges
-        edge = pp.edges[edge_id]
-        # start node
-        if edge.start_node_id not in nodes:
-            pt = edge.geometry[0]
-            nodes[edge.start_node_id] = Node(edge.start_node_id, pt, [])
-            pp.quadtree.add((pt.x, pt.y))
-        nodes[edge.start_node_id].star.append(edge_id)
-        # end node
-        if edge.end_node_id not in nodes:
-            pt = edge.geometry[-1]
-            pp.quadtree.add((pt.x, pt.y))
-            nodes[edge.end_node_id] = Node(edge.end_node_id, pt, [])
-        nodes[edges[edge_id].end_node_id].star.append(~edge_id)
-        # update quadtree
-        first, last = 0, len(edge.geometry) - 1
-        for i, pt in enumerate(edge.geometry):
-            if i == first or i == last:
-                continue
-            pp.quadtree.add((pt.x, pt.y))
+#        print("labelled = ", labelled)
+#        print("unlabelled = ", unlabelled)
+#        print("splittee_id = ", face_id)
+#        skeleton_edges, new_node_id, new_edge_id = label_segments(labelled, unlabelled, face_id, new_node_id, new_edge_id, pp.unbounded_id, srid=SRID)
+        # FIXME: SRID
+        skeleton_edges, new_node_id, new_edge_id = label_segments(labelled, unlabelled, face_id, new_node_id, new_edge_id, pp.unbounded_id, srid=SRID)
 
-        # sort edges counter clockwise (?) around a node
-        sort_on_angle = partial(get_correct_angle, edges=edges)
-        for tmp_node_id in [start_node_id, end_node_id]:
-            nodes[node_id].star.sort(key=sort_on_angle)
-        del tmp_node_id
+        for edge_id in edge_ids_in_wheel:
+            output_edge(output, pp, edge_id, face_step, step_sub=0)
+            remove_edge(edge_id, pp, edge_seq)
 
-        pp.edge_hierarchy[edge_id] = None
-        if edge_seq is not None:
-            eps = eps_for_edge_geometry(geometry)
-            edge_seq[edge_id] = eps
+        for edge in skeleton_edges:
+            (edge_id, start_node_id, end_node_id, left_face_id, right_face_id, geometry) = edge
+            pp.edges[edge_id] = Edge(
+                edge_id,
+                start_node_id,
+                angle(geometry[0], geometry[1]),
+                end_node_id,
+                angle(
+                    geometry[-1], geometry[-2]
+                ),  # angle from last point to second last point
+                left_face_id,
+                right_face_id,
+                geometry,
+                {"step_low": face_step, "step_low_sub": 0},
+            )  # FIXME: Keep info on merged edge?
+            # update faces
+            pp.faces[parent(left_face_id, pp.face_hierarchy)].edges.add(edge_id)
+            pp.faces[parent(right_face_id, pp.face_hierarchy)].edges.add(~edge_id)
+            # update nodes
+            nodes = pp.nodes
+            edges = pp.edges
+            edge = pp.edges[edge_id]
+            # start node
+            if edge.start_node_id not in nodes:
+                pt = edge.geometry[0]
+                nodes[edge.start_node_id] = Node(edge.start_node_id, pt, [])
+                pp.quadtree.add((pt.x, pt.y))
+            nodes[edge.start_node_id].star.append(edge_id)
+            # end node
+            if edge.end_node_id not in nodes:
+                pt = edge.geometry[-1]
+                pp.quadtree.add((pt.x, pt.y))
+                nodes[edge.end_node_id] = Node(edge.end_node_id, pt, [])
+            nodes[edges[edge_id].end_node_id].star.append(~edge_id)
+            # update quadtree
+            first, last = 0, len(edge.geometry) - 1
+            for i, pt in enumerate(edge.geometry):
+                if i == first or i == last:
+                    continue
+                pp.quadtree.add((pt.x, pt.y))
 
-    #########################################
-    # Output the splittee and remove it
-    output_face(output, pp, face_id, face_step)
-    # FIXME: output_face_hierarchy
-    remove_face(face_id, pp)
+            # sort edges counter clockwise (?) around a node
+            sort_on_angle = partial(get_correct_angle, edges=edges)
+            for tmp_node_id in [start_node_id, end_node_id]:
+                nodes[node_id].star.sort(key=sort_on_angle)
+            del tmp_node_id
 
-    return new_face_id, new_edge_id, new_node_id
-    ###################################
+            pp.edge_hierarchy[edge_id] = None
+            if edge_seq is not None:
+                eps = eps_for_edge_geometry(geometry)
+                edge_seq[edge_id] = eps
+                ## print(f"   >>> new eps value {eps} for edge {edge_id}")
+
+
+#        input("stopped splitarea")
+    #    visitor.ext_segments
+    #    visitor.connectors
+    #    visitor.bridges
+
+#    if False:  # face_id == 19126:
+#        with open("/tmp/out_all_raised.wkt", "w") as fh, open(
+#            "/tmp/out_edges_raised.wkt", "w"
+#        ) as fhe, open("/tmp/out_it_raised.wkt", "w") as fhit, open(
+#            "/tmp/out_vertices.wkt", "w"
+#        ) as fhv:
+#            #        , open(
+#            #            "/tmp/ext_edges.wkt", "w"
+#            #        ) as fhext:
+#            print("visited", it.visited)
+#            output_triangles(dt.triangles, fh)
+#            output_triangles(interior, fhit)
+#            output_edges(FiniteEdgeIterator(dt, constraints_only=True), fhe)
+#            output_vertices(dt.vertices, fhv)
+
+#        #            # output_external edges
+#        #            fhext.write("id;sn;sa;lf;rf;wkt\n")
+#        #            for edge in ext:
+#        #                fhext.write(";".join(map(str, edge)))
+#        #                fhext.write("\n")
+
+#        #        with open("/tmp/skel2.wkt", "w") as fh:
+#        #            fh.write("wkt\n")
+#        #            for seg in visitor.ext_segments:
+#        #                fh.write(
+#        #                    "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
+#        #                )
+
+#        #        with open("/tmp/skel3.wkt", "w") as fh:
+#        #            fh.write("wkt\n")
+#        #            for seg in visitor.segments:
+#        #                fh.write(
+#        #                    "LINESTRING({0[0].x} {0[0].y}, {0[1].x} {0[1].y})\n".format(seg)
+#        #                )
+#        input("triangles for split stored")
+
+#    if face_step > STOP:
+#        #
+#        output_pp_wkt(pp, "step_splitarea_split")
+#        with open("/tmp/interior_segs.wkt", "w") as fh:
+#            fh.write("wkt\n")
+#            for he in skeleton.half_edges.values():
+#                if not he.attrs["external"]:
+#                    fh.write(str(he.geometry))
+#                    fh.write("\n")
+#        #
+#        input("stopped")
+
+#    label_sides(skeleton)
+
+#    for edge in skeleton.half_edges.values():
+#        assert edge.left_face is not None
+#        assert edge.right_face is not None
+
+#    #        if face_id == 2100:
+#    #            output_topomap_wkt(skeleton, 'post_label')
+#    #        raw_input('pause')
+#    #        output_topomap_wkt(skeleton)
+#    #        try:
+#    prune_branches(skeleton)
+
+#    #        if face_id == 2100:
+#    #            output_topomap_wkt(skeleton, 'pruned')
+#    #        except AssertionError:
+#    #            output_pp_wkt(pp)
+#    #            output_topomap_wkt(skeleton, 'fail_assert')
+#    #            with open('/tmp/out_vertices.wkt', 'w') as fhv:
+#    #                output_vertices(dt.vertices, fhv)
+#    #            raise
+
+#    ########################################
+#    # -- make polylines of segments
+#    groups = define_groups(skeleton)
+#    new_node_id = make_new_node_ids(skeleton, new_node_id)
+#    new_edges, new_edge_id = make_new_edges(groups, new_edge_id)
+
+#    ########################################
+#    # -- Remove old edges (all edges with a relation to the face)
+#    # face_step += 1
+#    for edge_id in edges_incident_to_face:
+#        output_edge(output, pp, edge_id, face_step)
+#        remove_edge(edge_id, pp, edge_seq)
+
+#    # -- Add all new edges to the planar partition
+#    for (
+#        edge_id,
+#        start_node_id,
+#        end_node_id,
+#        left_face_id,
+#        right_face_id,
+#        geometry,
+#    ) in new_edges:
+#        # make new edge and
+#        # add it to the planar partition
+#        # FIXME: this should be methods add_edge / add_node / add_face
+#        # in the datastructure module
+#        pp.edges[edge_id] = Edge(
+#            edge_id,
+#            start_node_id,
+#            angle(geometry[0], geometry[1]),
+#            end_node_id,
+#            angle(
+#                geometry[-1], geometry[-2]
+#            ),  # angle from last point to second last point
+#            left_face_id,
+#            right_face_id,
+#            geometry,
+#            {"step_low": face_step},
+#        )  # FIXME: Keep info on merged edge?
+#        # update faces
+#        pp.faces[parent(left_face_id, pp.face_hierarchy)].edges.add(edge_id)
+#        pp.faces[parent(right_face_id, pp.face_hierarchy)].edges.add(~edge_id)
+#        # update nodes
+#        nodes = pp.nodes
+#        edges = pp.edges
+#        edge = pp.edges[edge_id]
+#        # start node
+#        if edge.start_node_id not in nodes:
+#            pt = edge.geometry[0]
+#            nodes[edge.start_node_id] = Node(edge.start_node_id, pt, [])
+#            pp.quadtree.add((pt.x, pt.y))
+#        nodes[edge.start_node_id].star.append(edge_id)
+#        # end node
+#        if edge.end_node_id not in nodes:
+#            pt = edge.geometry[-1]
+#            pp.quadtree.add((pt.x, pt.y))
+#            nodes[edge.end_node_id] = Node(edge.end_node_id, pt, [])
+#        nodes[edges[edge_id].end_node_id].star.append(~edge_id)
+#        # update quadtree
+#        first, last = 0, len(edge.geometry) - 1
+#        for i, pt in enumerate(edge.geometry):
+#            if i == first or i == last:
+#                continue
+#            pp.quadtree.add((pt.x, pt.y))
+
+#        # sort edges counter clockwise (?) around a node
+#        sort_on_angle = partial(get_correct_angle, edges=edges)
+#        for tmp_node_id in [start_node_id, end_node_id]:
+#            nodes[node_id].star.sort(key=sort_on_angle)
+#        del tmp_node_id
+
+#        pp.edge_hierarchy[edge_id] = None
+#        if edge_seq is not None:
+#            eps = eps_for_edge_geometry(geometry)
+#            edge_seq[edge_id] = eps
+#            print(f"   >>> new eps value {eps} for edge {edge_id}")
+
+        #########################################
+        # Output the splittee and remove it
+        output_face(output, pp, face_id, face_step)
+
+        for neighbour_id in neighbour_ids:
+            output_face_hierarchy(output, pp, face_id, neighbour_id, face_step, 'split')
+
+        # FIXME: output_face_hierarchy
+        remove_face(face_id, pp)
+
+        return new_face_id, new_edge_id, new_node_id
+        ###################################
     # -- Use the area shares to update the faces around their areas / importances
     ###################################
 

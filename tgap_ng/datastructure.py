@@ -8,6 +8,7 @@ import array
 import sys
 from geompreds import orient2d
 from quadtree import QuadTree
+from .edge_simplify.crosslinks import CrossLinks
 
 TAU = math.pi * 2 # https://tauday.com/
 
@@ -119,9 +120,9 @@ def csv_line(lst):
 def output_pp_wkt(pp, name=None):
     """ Output planar partition to well known text file
     """
-    nname = "n.wkt"
+    nname = "n.csv"
     ename = "e.csv"
-    fname = "f.wkt"
+    fname = "f.csv"
     if name is not None:
         nname = name + "_" + nname
         ename = name + "_" + ename
@@ -138,8 +139,8 @@ def output_pp_wkt(pp, name=None):
                         edge.start_angle,
                         edge.end_node_id,
                         edge.end_angle,
-                        edge.left_face_id,
-                        edge.right_face_id,
+                        parent(edge.left_face_id, pp.face_hierarchy),
+                        parent(edge.right_face_id, pp.face_hierarchy),
                         edge.info['step_low'],
                         edge.geometry,
                     ]
@@ -148,17 +149,33 @@ def output_pp_wkt(pp, name=None):
             )
 
     with open("/tmp/" + fname, "w") as fh:
-        print(csv_line(["id", "wkt"]), file=fh)
+        print(csv_line(["id", "wkt", "info"]), file=fh)
         for face in pp.faces.values():
             # "POINT({0[0]} {0[1]})".format(face.pip_geometry)
             #            print >> fh, ";".join(map(str, (face.id, "")))
             if face.pip_geometry is not None:
-                print(
-                    csv_line(
-                        [face.id, "POINT({0[0]} {0[1]})".format(face.pip_geometry)]
-                    ),
-                    file=fh,
-                )
+                geom = "POINT({0[0]} {0[1]})".format(face.pip_geometry)
+            else:
+                geom = "POINT EMPTY"
+            print(
+                csv_line(
+                    [face.id, geom, face.info]
+                ),
+                file=fh,
+            )
+
+    with open("/tmp/" + nname, "w") as fh:
+        print(csv_line(["id", "wkt", "star"]), file=fh)
+        for node in pp.nodes.values():
+            # "POINT({0[0]} {0[1]})".format(face.pip_geometry)
+            #            print >> fh, ";".join(map(str, (face.id, "")))
+            print(
+                csv_line(
+                    [node.id, node.geometry, node.star]
+                ),
+                file=fh,
+            )
+
             
 #            else:
 #                print(csv_line([face.id, "POINT EMPTY"]), file=fh)
@@ -184,6 +201,9 @@ class PlanarPartition(object):
         self.nodes = {}
         self.face_hierarchy = {}
         self.edge_hierarchy = {}
+        self.quadtree = None
+
+        self.crosslinks = CrossLinks()
 
         # indexed geometry
 
@@ -212,7 +232,7 @@ def angle(orig, dest):
 
 def dist(pa, pb):
     dx = pb[0] - pa[0]
-    dy = pb[1] - pb[1]
+    dy = pb[1] - pa[1]
     return (dx ** 2 + dy ** 2) ** 0.5
 
 
@@ -295,7 +315,7 @@ def retrieve(DATASET, SRID, unbounded_id):
     #    kdtree = Grid(sizes = (ceil(dataset_envelope.width/50.), ceil(dataset_envelope.height/50.)))
 
     ### get unique vertices by hashing the geometry
-    pts = {}
+    pts = set() #{}
 
     with connection(True) as db:
         for item in db.irecordset(sql):
@@ -312,7 +332,7 @@ def retrieve(DATASET, SRID, unbounded_id):
                 left_face_id,
                 right_face_id,
                 geometry,
-                {"step_low": 0}
+                {"step_low": 0, "step_low_sub": 0,}
                 # {'smooth': make_smooth_line(geometry)})
             )
             # check for dup points
@@ -321,11 +341,12 @@ def retrieve(DATASET, SRID, unbounded_id):
                 assert geometry[i] != geometry[j], geometry
 
             # DO_SIMPLIFY
-            for pt in geometry:
-                if (pt.x, pt.y) not in pts:
-                    pts[(pt.x, pt.y)] = [edge_id]
-                else:
-                    pts[(pt.x, pt.y)].append(edge_id)
+            for pt in geometry: # FIXME: could be just a set
+                pts.add((pt.x, pt.y))
+#                if (pt.x, pt.y) not in pts:
+#                    pts[(pt.x, pt.y)] = [edge_id]
+#                else:
+#                    pts[(pt.x, pt.y)].append(edge_id)
 
             # add the edge_ids to the edges sets of the faces
             # on the left and right of the edge
@@ -341,9 +362,9 @@ def retrieve(DATASET, SRID, unbounded_id):
             (dataset_envelope.xmin, dataset_envelope.ymin),
             (dataset_envelope.xmax, dataset_envelope.ymax),
         ],
-        64,
+        4,
     )
-    for pt in pts.keys():
+    for pt in pts:#.keys():
         tree.add(pt)
     pp.quadtree = tree
     print(f"{time.time()-t0:.3f}s quadtree construction")
@@ -406,12 +427,18 @@ def retrieve(DATASET, SRID, unbounded_id):
     # based on the wheels we find, we can obtain the size of the faces
     for face in faces.values():
         wheels = get_wheel_edges(face.edges, pp)
-        rings = [get_geometry_for_wheel(wheel, pp) for wheel in wheels]
-        rings = [(abs(ring.signed_area()), ring) for ring in rings]
-        rings.sort(reverse=True, key=lambda x: x[0])
-        area, largest_ring = rings[0]
-        perimeter = largest_ring.length
-        iso_perimetric_quotient = (4.0 * math.pi * area) / (perimeter * perimeter)
+        try:
+            rings = [get_geometry_for_wheel(wheel, pp) for wheel in wheels]
+            rings = [(abs(ring.signed_area()), ring) for ring in rings]
+            rings.sort(reverse=True, key=lambda x: x[0])
+            area, largest_ring = rings[0]
+            perimeter = largest_ring.length
+            iso_perimetric_quotient = (4.0 * math.pi * area) / (perimeter * perimeter)
+        except ValueError:
+            print(f'ValueError in {face.id} (e.g. too little coordinates in ring); setting values to 0')
+            area = 0
+            perimeter = 0
+            iso_perimetric_quotient = 0
 
         # FIXME: should we subtract hole regions from the faces?
         face.info["area"] = area
@@ -603,7 +630,7 @@ def do_output_quadtree(pp):
         output_points((pt for pt in pp.quadtree), fh)
 
 
-def dissolve_unwanted_nodes(pp):
+def dissolve_unwanted_nodes(pp, output):
     """
     Modify planar partition by dissolving edges that share a node
     of degree 2 where this is not needed
@@ -616,13 +643,32 @@ def dissolve_unwanted_nodes(pp):
         if len(star) == 2 and len(set(map(positive_id, star))) == 2:
             pair = tuple(map(positive_id, star))
             dissolve.append((node_id, pair))
-
+    print(f"{len(dissolve)} edge pairs can and will be merged")
     for new_edge_id, (node_id, pair) in enumerate(dissolve, start=new_edge_id):
-        merge_edge_pair(pair, node_id, new_edge_id, pp, None, None, 0)
+        merge_edge_pair(pair, node_id, new_edge_id, pp, None, output, 0)
 
 
-#        do_output_quadtree(pp)
-#        input('paused - check after merge pair')
+def dissolve_unwanted_edges(pp):
+    """
+    Modify planar partition by dissolving edges 
+    that are between faces with the same feature class
+    """
+    new_edge_id = max(pp.edges.keys()) + 1
+    dissolve = []
+    for edge_id, edge in pp.edges.items():
+        left_face_id = parent(edge.left_face_id, pp.face_hierarchy)
+        right_face_id = parent(edge.right_face_id, pp.face_hierarchy)
+        klass_left = -1
+        if 'feature_class_id' in pp.faces[left_face_id].info:
+            klass_left = pp.faces[left_face_id].info['feature_class_id']
+        klass_right = -1
+        if 'feature_class_id' in pp.faces[right_face_id].info:
+            klass_right = pp.faces[right_face_id].info['feature_class_id']
+        if klass_left == klass_right:
+            dissolve.append({'edge_id': edge_id,
+                             'left_face_id': left_face_id,
+                             'right_face_id': right_face_id})
+    return dissolve
 
 
 def parent(par, hierarchy, shorten=False):
@@ -632,7 +678,8 @@ def parent(par, hierarchy, shorten=False):
     (with a recursive algorithm this could be on the way out)
     """
     # seen = []
-    init = par
+    init = last = par
+    assert par is not None
     try:
         while par is not None:
             last = par
@@ -640,6 +687,7 @@ def parent(par, hierarchy, shorten=False):
             par = hierarchy[par]
     except KeyError:
         raise KeyError("while looking up {} I did not find {}".format(init, par))
+    assert last is not None
     # update the hierarchy to shorten paths to traverse in the future
     # FIXME: WOULD THIS HELP PERFORMANCE A LOT? NOTE: depends on whether info is still needed for writing to DB whether this *CAN* be done!
     # -- modifies hierarchy
@@ -709,7 +757,7 @@ def get_wheel_edges(unsorted_edges_for_face, pp):
             node_id = edges[~edge_id].start_node_id
 #        star = stars[node_id]
         star = nodes[node_id].star
-        angles = [get_correct_angle(_, edges) for _ in star]
+        ## angles = [get_correct_angle(_, edges) for _ in star]
         indx = star.index(~edge_id)
         next_edge_id = star[(indx - 1) % len(star)]
         #        print ""
@@ -1023,7 +1071,7 @@ def edge_pairs(node_ids, pp):
 
 
 # FIXME: rename as 'store_edge' ?
-def output_edge(output, pp, edge_id, face_step):
+def output_edge(output, pp, edge_id, face_step, step_sub):
     """output a edge to the data storage
     """
     # START
@@ -1039,16 +1087,21 @@ def output_edge(output, pp, edge_id, face_step):
     if not output:
         return
     e = pp.edges[edge_id]
-    if e.info["step_low"] == face_step:
-        #        print('skipping output for edge {}'.format(edge_id))
-        return
-    assert face_step > e.info["step_low"], "id: {}, step-lo: {}, step-hi: {}".format(
-        e.id, e.info["step_low"], face_step
-    )
+#    if e.info["step_low"] == face_step:
+#        print('skipping output for edge {}'.format(edge_id))
+#        return
+#    assert face_step > e.info["step_low"], "id: {}, step-lo: {}, step-hi: {}".format(
+#        e.id, e.info["step_low"], face_step
+#    )
     tup = (
         e.id,                                       # edge id
         e.info["step_low"],                         # step low
+        e.info["step_low_sub"],                         # step low
         face_step,                                  # step high
+        step_sub,                                   # the sub step in which this edge is stored
+
+        e.info["step_low"] + e.info["step_low_sub"] / 3.0, # step_low_frac
+        face_step + step_sub / 3.0,                        # step_high_frac
 
         e.start_node_id,                            # start node
         e.end_node_id,                              # end node
@@ -1152,7 +1205,7 @@ def merge_edge_pair(pair, middle_node_id, new_edge_id, pp, edge_seq, output, fac
     # update the planar partition
     for tmp_id in (one_id, other_id):
         if output is not None:
-            output_edge(output, pp, tmp_id, face_step)
+            output_edge(output, pp, tmp_id, face_step, step_sub=1)
         remove_edge(tmp_id, pp, edge_seq)
     del tmp_id
     #
@@ -1171,7 +1224,7 @@ def merge_edge_pair(pair, middle_node_id, new_edge_id, pp, edge_seq, output, fac
         left_face_id,
         right_face_id,
         geometry,
-        {"step_low": face_step},
+        {"step_low": face_step, "step_low_sub": 1},
     )  # FIXME: Keep info on merged edge?
 
     # DO_SIMPLIFY
@@ -1199,10 +1252,16 @@ def merge_edge_pair(pair, middle_node_id, new_edge_id, pp, edge_seq, output, fac
     edge_hierarchy[one_id] = edge_id
     edge_hierarchy[other_id] = edge_id
     edge_hierarchy[edge_id] = None
+    ## store in DBMS / bit duplicate with keeping structure in main memory?
+    output_edge_hierarchy(output, one_id, edge_id)
+    output_edge_hierarchy(output, other_id, edge_id)
 
     # DO_SIMPLIFY
     # print('made new edge', edge_id)
     if edge_seq is not None:
+        # instead of computing eps again, 
+        # we could look at the eps at the 'joint' of the two edges,
+        # and the two original epsilon values
         eps = eps_for_edge_geometry(geometry)
         edge_seq[edge_id] = eps
 
@@ -1246,14 +1305,13 @@ def output_face(output, pp, face_id, face_step):
 # END
 
 
-def output_face_hierarchy(output, pp, face_id, parent_face_id, face_step):
+def output_face_hierarchy(output, pp, face_id, parent_face_id, face_step, operation):
     """output a face with its parent to the data storage
     """
     # START
     #     [face_id,
-    #      imp_low, imp_high,
     #      step_low, step_high,
-    #      parent_id,
+    #      parent_id, operation
     #      ],
     if not output:
         return
@@ -1261,9 +1319,17 @@ def output_face_hierarchy(output, pp, face_id, parent_face_id, face_step):
     f = pp.faces[face_id]
     assert f.id == face_id
     tup = (f.id, 
-            #None, None, 
-            f.info["step_low"], face_step, parent_face_id)
+            f.info["step_low"], face_step, parent_face_id, operation)
     output.face_hierarchy.append(*tup)
+
+
+def output_edge_hierarchy(output, edge_id, parent_edge_id):
+    """output a edge with its parent to the data storage
+    """
+    if not output:
+        return
+    tup = (edge_id, parent_edge_id)
+    output.edge_hierarchy.append(*tup)
 
 
 def universe_merge_face_pair(
@@ -1287,7 +1353,7 @@ def universe_merge_face_pair(
     # if len(common) > 10:
     #    print len(common),"*"
     for edge_id in common:
-        output_edge(output, pp, edge_id, face_step)
+        output_edge(output, pp, edge_id, face_step, step_sub=0)
         nodes_to_check.extend(remove_edge(edge_id, pp, edge_seq))
         # we merge edges and their geometries into longer chains
         # we get a node_id list back from the remove_edge function
@@ -1340,7 +1406,7 @@ def universe_merge_face_pair(
     #    output_face(output, pp, neighbour_face_id, face_step)
 
     # FIXME: OUTPUT face_hierarchy
-    output_face_hierarchy(output, pp, face_id, pp.unbounded_id, face_step)
+    output_face_hierarchy(output, pp, face_id, pp.unbounded_id, face_step, 'merge')
     #    output_face_hierarchy(output, pp, neighbour_face_id, new_face_id, face_step)
 
     # we remove the two old faces
@@ -1364,21 +1430,41 @@ def merge_face_pair(
 
     nodes_to_check = []
     common = list(common_boundary(face_id, neighbour_face_id, pp))
+    # we will adjust the perimeter of the new face by subtracting 
+    # 2 * common boundary length
     common_boundary_length = sum(
         (pp.edges[edge_id].geometry.length for edge_id in common)
     )
+    
     # if len(common) > 10:
     #    print len(common),"*"
     for edge_id in common:
         if False:
             print(f"   _ removing edge {edge_id}")
-        output_edge(output, pp, edge_id, face_step)
+        output_edge(output, pp, edge_id, face_step, step_sub=0) # 
         nodes_to_check.extend(remove_edge(edge_id, pp, edge_seq))
         # we merge edges and their geometries into longer chains
         # we get a node_id list back from the remove_edge function
         # then we can check whether at these nodes there is exactly
         # two edges incident and we subsequently glue the edges in a binary
         # fashion
+
+    for edge_id in set((positive_id(signed_edge_id) for signed_edge_id in faces[face_id].edges)):
+        if edge_id not in common:
+            output_edge(output, pp, edge_id, face_step, step_sub=0)
+            # the edge stays, but with a new lifespan
+            edge = pp.edges[edge_id]
+            pp.edges[edge_id] = Edge(
+                edge_id,
+                edge.start_node_id,
+                edge.start_angle,
+                edge.end_node_id,
+                edge.end_angle,
+                neighbour_face_id if edge.left_face_id == face_id else edge.left_face_id,
+                neighbour_face_id if edge.right_face_id == face_id else edge.right_face_id,
+                edge.geometry,
+                {"step_low": face_step, "step_low_sub": 0,}
+            )
 
     #            # we could make a set of all glue_edges (positive ids)
     #            # start at one of these and then walk in both directions
@@ -1403,10 +1489,10 @@ def merge_face_pair(
     info["area"] += faces[face_id].info["area"]
     info["perimeter"] += faces[face_id].info["perimeter"]
     info["perimeter"] -= 2.0 * common_boundary_length
-    info["step_low"] = face_step
     # and then we can make one new face...
     new_face = Face(
-        new_face_id,
+        #new_face_id,
+        neighbour_face_id,
         mbr,
         pip,
         # union the edge lists of the two faces
@@ -1415,23 +1501,23 @@ def merge_face_pair(
     )
     assert new_face_id not in faces
     # that we add to the faces dictionary
-    faces[new_face_id] = new_face
+    faces[neighbour_face_id] = new_face
 
     # add info about the merge into the face face_hierarchy dict
-    face_hierarchy[face_id] = new_face_id
-    face_hierarchy[neighbour_face_id] = new_face_id
-    face_hierarchy[new_face_id] = None
+    face_hierarchy[face_id] = neighbour_face_id
+    #face_hierarchy[neighbour_face_id] = new_face_id
+    #face_hierarchy[new_face_id] = None
 
     output_face(output, pp, face_id, face_step)
-    output_face(output, pp, neighbour_face_id, face_step)
+    # output_face(output, pp, neighbour_face_id, face_step)
 
     # FIXME: OUTPUT face_hierarchy
-    output_face_hierarchy(output, pp, face_id, new_face_id, face_step)
-    output_face_hierarchy(output, pp, neighbour_face_id, new_face_id, face_step)
+    output_face_hierarchy(output, pp, face_id, neighbour_face_id, face_step, 'merge')
+    #output_face_hierarchy(output, pp, neighbour_face_id, new_face_id, face_step, 'merge')
 
-    # we remove the two old faces
+    # we remove the merged face
     remove_face(face_id, pp)
-    remove_face(neighbour_face_id, pp)
+    # remove_face(neighbour_face_id, pp)
 
     return nodes_to_check
 

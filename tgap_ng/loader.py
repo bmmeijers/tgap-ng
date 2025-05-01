@@ -66,6 +66,7 @@ def worker(queue):
     #    output_queue.put(result), note - no output queue is used
     # shutdown the worker process
     # --
+    db = None
     for i, msg in enumerate(iter(queue.get, None), start=1):
         logging.debug("{} {} {}".format(multiprocessing.current_process().name, "handles", id(msg)))
         start = timeit.default_timer()
@@ -73,17 +74,23 @@ def worker(queue):
         # in its memory usage if we leave open the connection
         # so we re-open the connection for every message we handle
         # to prevent high memory usage also at dbms server side
-        with connection.connection(True) as db:
-            if isinstance(msg, ReadCommittedMessage):
+        if db is None:
+            db = connection.connection(True)
+        # with connection.connection(True) as db:
+        if isinstance(msg, ReadCommittedMessage):
 #                with closing(StringIO(msg.payload)) as stream:
 #                    db.execute(stream.getvalue())
-                db.execute(msg.payload)
-            elif isinstance(msg, AutoCommitMessage):
+            db.execute(msg.payload)
+        elif isinstance(msg, AutoCommitMessage):
 #                with closing(StringIO(msg.payload)) as stream:
-                db.execute(msg.payload, isolation_level=0)
-            elif isinstance(msg, CopyFromMessage):
-                with closing(StringIO(msg.data)) as stream:
-                    db.copy_from(stream, msg.table, columns=msg.columns, sep="\t") 
+            db.execute(msg.payload, isolation_level=0)
+        elif isinstance(msg, CopyFromMessage):
+            with closing(StringIO(msg.data)) as stream:
+                db.copy_from(stream, msg.table, columns=msg.columns, sep="\t")
+        if i % 100 == 0:
+            db.close()
+            db = None
+            db = connection.connection(True)
         now = timeit.default_timer()
         logging.debug("{} {} {} {} {} {} {}".format(multiprocessing.current_process().name, "handled", id(msg), type(msg), "taking", "{:.4f}".format(now - start), "sec(s)"))
     logging.debug("{} {}".format(multiprocessing.current_process().name, "closed"))
@@ -146,10 +153,10 @@ class SinkLoaderMixin(object):
                                       layer.schema.names,
                                       stream.getvalue()))
 
-    def load_indexes(self, layer):
+    def load_indexes(self, layer, tablespace='pg_default'):
         # -- make the indexes
         with closing(StringIO()) as stream:
-            dump_indices(layer, stream)
+            dump_indices(layer, stream, tablespace)
             self.load(ReadCommittedMessage(stream.getvalue()))
 
     def load_statistics(self, layer):

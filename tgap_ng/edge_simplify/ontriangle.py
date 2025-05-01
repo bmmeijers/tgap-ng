@@ -92,9 +92,8 @@ def on_triangle(p_test, p0, p1, p2):
     """
     Using bary-centric logic (twice as fast as halfplane based method)
 
-    Returns true when ``pt'' is on triangle (formed by point ``a'', ``b'' 
-    and ``c''), which means: not on exterior (returns False); On interior or 
-    on boundary (returns True)
+    Returns true when *pt* is on triangle (formed by point *a*, *b* and *c*), which means:
+    not on exterior (returns False); On interior or on boundary (returns True)
 
     From: https://stackoverflow.com/a/34093754
     """

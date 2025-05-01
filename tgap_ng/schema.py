@@ -13,16 +13,20 @@ def output_layers(name, srid):
 #                       ('face', 'face_geometry', 'face_hierarchy', 'edge', 'node'))
     class tGAP(object):
         def __init__(self):
-            self.face = None
-#            self.face_geometry = None
-            self.face_hierarchy = None
-            self.edge = None
+
             self.node = None
-            self.edge_statistics = None
+            self.edge = None
+            self.face = None
+
+            self.edge_hierarchy = None
+            self.face_hierarchy = None
+
         def __iter__(self):
-            return iter([self.face, 
-                         #self.face_geometry, 
-                         self.face_hierarchy, self.edge, self.node, self.edge_stats])
+            return iter([self.node, 
+                         self.edge,
+                         self.face,
+                         self.edge_hierarchy, 
+                         self.face_hierarchy])
 
     tgap = tGAP()
     # imp values
@@ -31,7 +35,12 @@ def output_layers(name, srid):
     #imp_own = Field("imp_own", "float8")
     # step
     step_low = Field("step_low", "integer") # max: 2147483647
+    step_low_sub = Field("step_low_sub", "integer")
     step_high = Field("step_high", "integer")
+    step_high_sub = Field("step_high_sub", "integer")
+
+    step_low_frac = Field("step_low_frac", "numeric") # max: 2147483647
+    step_high_frac = Field("step_high_frac", "numeric")
 
     gstep_low = Field("gstep_low", "integer") # max: 2147483647
     gstep_high = Field("gstep_high", "integer")
@@ -49,8 +58,9 @@ def output_layers(name, srid):
     ###########
     mbr = Field("mbr_geometry", "box2d") 
     pip = Field("pip_geometry", "point")
-    parent_id = Field("parent_face_id", "integer")
-    polygon = Field("geometry", "polygon")
+    parent_face_id = Field("parent_face_id", "integer")
+    parent_edge_id = Field("parent_edge_id", "integer")
+    #polygon = Field("geometry", "polygon")
     # edge
     edge_id = Field("edge_id", "integer")
     left_low = Field("left_face_id_low", "integer")
@@ -66,6 +76,8 @@ def output_layers(name, srid):
     # node
     node_id = Field("node_id", "integer")
     coord = Field("geometry", "point", dimension = 0)     # FIXME: dimension -> needed?
+
+    operation = Field("operation", "varchar") # FIXME: should we store this later as enum?
     #
     face_schema = Schema(
         [face_id, 
@@ -101,19 +113,30 @@ def output_layers(name, srid):
     #
     face_hier_schema = Schema(
         [face_id,
-         # imp_low, imp_high,
          step_low, step_high,
-         parent_id,
+         parent_face_id, operation
          ],
-        [Index(fields = [face_id, step_low], primary_key = True),
+        [Index(fields = [face_id, step_low, parent_face_id], primary_key = True),
          #Index(fields = [imp_low]),
          #Index(fields = [imp_high]),
-         Index(fields = [parent_id]), ]
+         Index(fields = [parent_face_id]), ]
     )
+
+    edge_hier_schema = Schema(
+        [edge_id, parent_edge_id],
+        [Index(fields = [edge_id], primary_key = True),
+         Index(fields = [parent_edge_id]), ]
+    )
+
     #
+    #create index tmp_lf_low on top10nl_20x20_tgap_edge (left_face_id_low, step_low, step_low_sub) tablespace indx;
+    #create index tmp_rf_low on top10nl_20x20_tgap_edge (right_face_id_low, step_low, step_low_sub) tablespace indx;
+    
+    
     edge_schema = Schema(
         [edge_id, 
-         step_low, step_high, 
+         step_low, step_low_sub, step_high, step_high_sub,
+         step_low_frac, step_high_frac,
          start, end, 
          left_low, right_low, left_high, right_high, 
          #imp_low, imp_high,
@@ -123,11 +146,15 @@ def output_layers(name, srid):
          #pickled_blg,
          #smoothline,
          path],
-        [Index(fields = [edge_id, step_low], primary_key = True),
-         #Index(fields = [imp_low]),
-         #Index(fields = [imp_high]),
+        [Index(fields = [edge_id, step_low, step_low_sub], primary_key = True),
          Index(fields = [step_low]),
          Index(fields = [step_high]),
+         Index(fields = [step_low, step_low_sub]),
+         Index(fields = [left_low, step_low, step_low_sub]),
+         Index(fields = [right_low, step_low, step_low_sub]),
+         Index(fields = [step_high, step_high_sub]),
+         Index(fields = [left_high]),
+         Index(fields = [right_high]),
          Index(fields = [path])]
     )
     #
@@ -180,13 +207,6 @@ def output_layers(name, srid):
     face_layer = Layer(face_schema, 
                                 "{0}_tgap_face".format(name), 
                                 srid = srid)
-#     face_geometry_layer = StreamingLayer(face_geometry_schema, 
-#                                 "{0}_tgap_face_geometry".format(name), 
-#                                 srid = srid, 
-#                                 stream=face_geometry_file)
-    face_hier_layer = Layer(face_hier_schema, 
-                            "{0}_tgap_face_hierarchy".format(name), 
-                            srid = srid)
     edge_layer = Layer(edge_schema, 
                                 "{0}_tgap_edge".format(name), 
                                 srid = srid)
@@ -194,16 +214,26 @@ def output_layers(name, srid):
                                 "{0}_tgap_node".format(name), 
                                 srid = srid)
 
-    edge_stats_layer = Layer(edge_stats_schema, 
-                                "{0}_tgap_edge_stats".format(name), 
-                                srid = srid)
+    face_hier_layer = Layer(face_hier_schema, 
+                            "{0}_tgap_face_hierarchy".format(name), 
+                            srid = srid)
+    edge_hier_layer = Layer(edge_hier_schema, 
+                            "{0}_tgap_edge_hierarchy".format(name), 
+                            srid = srid)
 
-    tgap.face = face_layer
-#     tgap.face_geometry = face_geometry_layer
-    tgap.face_hierarchy = face_hier_layer
-    tgap.edge = edge_layer
-    tgap.edge_stats = edge_stats_layer
+#    edge_stats_layer = Layer(edge_stats_schema, 
+#                                "{0}_tgap_edge_stats".format(name), 
+#                                srid = srid)
+
+    #tgap.edge_stats = edge_stats_layer
+
     tgap.node = node_layer
+    tgap.edge = edge_layer
+    tgap.face = face_layer
+
+    tgap.edge_hierarchy = edge_hier_layer
+    tgap.face_hierarchy = face_hier_layer
+
     return tgap
 
 
