@@ -120,7 +120,7 @@ import sys
 #SRID = 28992
 #BASE_DENOMINATOR = 10000
 
-DATASET, unbounded_id = "ei", -1
+DATASET, unbounded_id = "yan", -1
 SRID = 28992
 BASE_DENOMINATOR = 10000
 
@@ -304,7 +304,7 @@ def main():
 
     t0 = time.time()
     # faceseq = OrderedSequence(cmp=face_compare)
-    faceseq = pqdict.PQDict()  # oid -> priority
+    faceseq = pqdict.pqdict()  # oid -> priority
     for face in pp.faces.values():
         if face.id != pp.unbounded_id:
             faceseq[face.id] = face.info["area"]  # faceseq.add(face)
@@ -315,7 +315,7 @@ def main():
     ##        index_edges_for_face(face, pp)
 
     t0 = time.time()
-    edge_seq = pqdict.PQDict()  # oid -> priority
+    edge_seq = pqdict.pqdict()  # oid -> priority
     for edge in pp.edges.values():
         edge_seq[edge.id] = eps_for_edge_geometry(edge.geometry)
     print(f"{time.time()-t0:.3f}s priority indexed edges")
@@ -485,7 +485,7 @@ def main():
         ## - it may also be better to split elongated water features
         ## - ...
         op = "merge"
-        if pp.faces[face_id].info["feature_class_id"] // 1000 in (10, 12):
+        if pp.faces[face_id].info["feature_class_id"] and pp.faces[face_id].info["feature_class_id"] // 1000 in (10, 12):
             op = "split"
         else:
             op = "merge"
@@ -752,7 +752,7 @@ def main():
     # - finalize tables: indexing + clustering
     with AsyncLoader(workers=4) as loader:
         for table in output:
-            loader.load_indexes(table, tablespace='indx')
+            loader.load_indexes(table, tablespace='pg_default')
             del table
 
     # - finalize tables: statistics

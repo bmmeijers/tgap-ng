@@ -78,7 +78,7 @@ def simplify(pp, edge_id, tolerance=float("inf"), DEBUG=False):
 
     # measures for points
     # first and last do not get any measure
-    oseq = pqdict.PQDict()
+    oseq = pqdict.pqdict()
     for i in range(1, len(line) - 1):
 
         size = area(line[prv[i]], line[i], line[nxt[i]])
